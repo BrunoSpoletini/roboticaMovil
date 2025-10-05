@@ -199,21 +199,21 @@ def graficar_parametros_cilindro(grupos, parametros):
             punto_min[1],
             "go",
             markersize=8,
-            label=f"Min Grupo {i + 1}" if i == 0 else "",
+            label="Min Grupo" if i == 0 else "",
         )
         plt.plot(
             punto_max[0],
             punto_max[1],
             "ro",
             markersize=8,
-            label=f"Max Grupo {i + 1}" if i == 0 else "",
+            label="Max Grupo" if i == 0 else "",
         )
         plt.plot(
             punto_medio[0],
             punto_medio[1],
             "yo",
             markersize=8,
-            label=f"Medio Grupo {i + 1}" if i == 0 else "",
+            label="Medio Grupo" if i == 0 else "",
         )
 
         # Graficar el centro del cilindro
@@ -223,7 +223,7 @@ def graficar_parametros_cilindro(grupos, parametros):
             centro[1],
             "bo",
             markersize=10,
-            label=f"Centro Grupo {i + 1}" if i == 0 else "",
+            label="Centro Grupo" if i == 0 else "",
         )
 
     plt.title("Grupos de Puntos con Parámetros de Cilindros")
@@ -245,7 +245,7 @@ grupos_puntos = agrupar_puntos_por_distancia(puntos)
 parametros_cilindros = obtener_parametros_cilindro(grupos_puntos)
 
 # Graficar los grupos y sus parámetros
-# graficar_parametros_cilindro(grupos_puntos, parametros_cilindros)
+graficar_parametros_cilindro(grupos_puntos, parametros_cilindros)
 
 # Escribimos los landmarks en un archivo
 with open("landmarks.txt", "w") as f:
