@@ -55,7 +55,7 @@ def generate_launch_description():
     if os.path.exists("/home/sco/Documents/roboticaMovil/TP2/tb3_sandbox.sdf.xacro"):
         world = "/home/sco/Documents/roboticaMovil/TP2/tb3_sandbox.sdf.xacro"
     else:
-        world = "/home/superspole/roboticaMovil/TP2/tb3_sandbox.sdf.xacro"
+        world = "/home/bruno/roboticaMovil/TP2/tb3_sandbox.sdf.xacro"
 
     # Launch configuration variables specific to simulation
     rviz_config_file = LaunchConfiguration("rviz_config_file")

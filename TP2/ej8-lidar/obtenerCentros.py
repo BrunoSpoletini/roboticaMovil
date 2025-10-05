@@ -145,11 +145,19 @@ def obtener_parametros_cilindro(grupos):
         # Calcular el centro del cilindro (promedio de los tres puntos)
         centro = centro_circulo(punto_min, punto_medio, punto_max)
 
+        # Calcular el radio del cilindro
+        radio = np.mean(
+            [np.linalg.norm(centro - punto_min),
+             np.linalg.norm(centro - punto_medio),
+             np.linalg.norm(centro - punto_max)]
+        )
+
         parametros.append(
             {
                 "punto_min": punto_min,
                 "punto_max": punto_max,
                 "punto_medio": punto_medio,
+                "radio": radio,
                 "centro": centro,
             }
         )
@@ -237,4 +245,10 @@ grupos_puntos = agrupar_puntos_por_distancia(puntos)
 parametros_cilindros = obtener_parametros_cilindro(grupos_puntos)
 
 # Graficar los grupos y sus parámetros
-graficar_parametros_cilindro(grupos_puntos, parametros_cilindros)
+# graficar_parametros_cilindro(grupos_puntos, parametros_cilindros)
+
+# Escribimos los landmarks en un archivo
+with open("landmarks.txt", "w") as f:
+    for param in parametros_cilindros:
+        f.write(f"{param['centro'][0]}, {param['centro'][1]}, {param['radio']}\n")
+        
