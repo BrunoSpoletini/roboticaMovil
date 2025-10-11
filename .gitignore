@@ -2,5 +2,8 @@ log
 build
 install
 examples
-TP3/archivosTP3
-venv
+.venv
+TP3/archivos
+TP3/image_pipeline
+
+
