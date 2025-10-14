@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'publisher = camera_info_publisher.publisher:main',
+            'stereo_image_saver = camera_info_publisher.saver:main',
         ],
     },
 )
