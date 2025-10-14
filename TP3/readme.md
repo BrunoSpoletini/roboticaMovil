@@ -27,7 +27,7 @@ ros2 bag play archivos/rosbags/ros2/cam_checkerboard/cam_checkerboard.db3 --loop
 
 ## Iniciar la calibracion 
 ### --no-service-check es para que el calibrador no busque el servicio set_camera_info del driver de la camara, ya que estamos publicando la imagen desde un bag, que no tiene esa info
-ros2 run camera_calibration cameracalibrator --size 6x5 --square 0.06 --no-service-check --ros-args --remap left:=/cam0/image_raw --ros-args --remap right:=/cam1/image_raw -p camera:=/my_camera
+ros2 run camera_calibration cameracalibrator --size 7x6 --square 0.06 --no-service-check --ros-args --remap left:=/cam0/image_raw --ros-args --remap right:=/cam1/image_raw -p camera:=/my_camera
 
 # Ver la camara en rviz (solo para hacer debug)
 ros2 run rviz2 rviz2
