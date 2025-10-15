@@ -1,8 +1,9 @@
 import cv2
+import paths
 
 # --- Cargar imágenes izquierda y derecha ---
-left_img = cv2.imread('/home/sco/roboticaMovil/TP3/left.png', cv2.IMREAD_GRAYSCALE)
-right_img = cv2.imread('/home/sco/roboticaMovil/TP3/right.png', cv2.IMREAD_GRAYSCALE)
+left_img = cv2.imread(f'{paths.folder_path}/TP3/images/left.png', cv2.IMREAD_GRAYSCALE)
+right_img = cv2.imread(f'{paths.folder_path}/TP3/images/right.png', cv2.IMREAD_GRAYSCALE)
 
 # --- Detector FAST ---
 fast = cv2.FastFeatureDetector_create(threshold=25, nonmaxSuppression=True)
@@ -32,5 +33,5 @@ cv2.waitKey(0)
 cv2.destroyAllWindows()
 
 # --- Guardar imágenes para el informe ---
-cv2.imwrite('/home/sco/roboticaMovil/TP3/left_FAST_features.png', img_left_kp)
-cv2.imwrite('/home/sco/roboticaMovil/TP3/right_FAST_features.png', img_right_kp)
+cv2.imwrite(f'{paths.folder_path}/TP3/left_FAST_features.png', img_left_kp)
+cv2.imwrite(f'{paths.folder_path}/TP3/right_FAST_features.png', img_right_kp)

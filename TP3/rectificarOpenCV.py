@@ -3,27 +3,34 @@ import yaml
 import numpy as np
 import cv2 as cv
 
+path_camara_izquierda = './images/left.png'
+path_camara_derecha = './images/right.png'
+
+path_calibracion_left = './calibrationData/left.yaml'
+path_calibracion_right = './calibrationData/right.yaml'
+
 def leer_camera_info():
     # Leer datos de calibracion de camaras estereo
-    with open("./calibrationData/left.yaml", "r") as f:
+    with open(path_calibracion_left, "r") as f:
         leftCameraInfo = yaml.safe_load(f)
 
-    with open("./calibrationData/right.yaml", "r") as f:
+    with open(path_calibracion_right, "r") as f:
         rightCameraInfo = yaml.safe_load(f)
 
-    print("Left Camera Calibration Data:")
-    for key, value in leftCameraInfo.items():
-        print(f"  {key}: {value}")
-
-    print("Right Camera Calibration Data:")
-    for key, value in rightCameraInfo.items():
-        print(f"  {key}: {value}")
     return leftCameraInfo, rightCameraInfo
 
+def leer_imagenes():
+    left_image = cv.imread(path_camara_izquierda, cv.IMREAD_COLOR)
+    right_image = cv.imread(path_camara_derecha, cv.IMREAD_COLOR)
+    return left_image, right_image
 
-def extraer_rt(K, P):
-    K = np.array(K).reshape(3, 3)
-    P = np.array(P).reshape(3, 4)
+def obtener_mapa_remapeo(leftCameraInfo, rightCameraInfo):
+    # Obtener las dimensiones de las imágenes
+    image_size = (leftCameraInfo['image_width'], leftCameraInfo['image_height'])
+
+    # Extraer matrices de rotacion y traslacion entre camaras
+    K = np.array(rightCameraInfo['camera_matrix']['data']).reshape(3, 3)
+    P = np.array(rightCameraInfo['projection_matrix']['data']).reshape(3, 4)
 
     # Compute [R | T] = K^-1 * P
     K_inv = np.linalg.inv(K)
@@ -33,23 +40,16 @@ def extraer_rt(K, P):
     R = RT[:, :3]
     T = RT[:, 3]
 
-    return R, T
-
-
-
-def leer_imagenes():
-    left_image_path = './images/cam0.png'
-    right_image_path = './images/cam1.png'
-
-    left_image = cv.imread(left_image_path, cv.IMREAD_COLOR)
-    right_image = cv.imread(right_image_path, cv.IMREAD_COLOR)
-
-    return left_image, right_image
-
-
-def rectificar_imagenes(left_image, right_image, leftCameraInfo, rightCameraInfo, R1, R2, P1, P2):
-    # Obtener las dimensiones de las imágenes
-    image_size = (leftCameraInfo['image_width'], leftCameraInfo['image_height'])
+    # Calcular las matrices de rectificación
+    R1, R2, P1, P2, Q, _, _ = cv.stereoRectify(
+        cameraMatrix1=np.array(leftCameraInfo['camera_matrix']['data']).reshape(3, 3),
+        distCoeffs1=np.array(leftCameraInfo['distortion_coefficients']['data']),
+        cameraMatrix2=np.array(rightCameraInfo['camera_matrix']['data']).reshape(3, 3),
+        distCoeffs2=np.array(rightCameraInfo['distortion_coefficients']['data']),
+        imageSize=(leftCameraInfo['image_width'], leftCameraInfo['image_height']),
+        R=np.array(R),
+        T=np.array(T)
+    )
 
     # Calcular los mapas de remapeo para las cámaras izquierda y derecha
     left_map1, left_map2 = cv.initUndistortRectifyMap(
@@ -70,37 +70,20 @@ def rectificar_imagenes(left_image, right_image, leftCameraInfo, rightCameraInfo
         m1type=cv.CV_32FC1
     )
 
-    # Aplicar remapeo a las imágenes
-    rectified_left = cv.remap(left_image, left_map1, left_map2, interpolation=cv.INTER_LINEAR)
-    rectified_right = cv.remap(right_image, right_map1, right_map2, interpolation=cv.INTER_LINEAR)
-
-    return rectified_left, rectified_right
+    return left_map1, left_map2, right_map1, right_map2
 
 
 def main():
+    # Leer datos de calibracion y las imagenes
     leftCameraInfo, rightCameraInfo = leer_camera_info()
     left_image, right_image = leer_imagenes()
 
-    # Extraer matrices de rotacion y traslacion entre camaras
-    K = rightCameraInfo['camera_matrix']['data']
-    P = rightCameraInfo['projection_matrix']['data']
-    R, T = extraer_rt(K, P)
+    # Obtener los mapas de remapeo
+    left_map1, left_map2, right_map1, right_map2 = obtener_mapa_remapeo(leftCameraInfo, rightCameraInfo)
 
-    # Calcular las matrices de rectificación
-    R1, R2, P1, P2, Q, _, _ = cv.stereoRectify(
-        cameraMatrix1=np.array(leftCameraInfo['camera_matrix']['data']).reshape(3, 3),
-        distCoeffs1=np.array(leftCameraInfo['distortion_coefficients']['data']),
-        cameraMatrix2=np.array(rightCameraInfo['camera_matrix']['data']).reshape(3, 3),
-        distCoeffs2=np.array(rightCameraInfo['distortion_coefficients']['data']),
-        imageSize=(leftCameraInfo['image_width'], leftCameraInfo['image_height']),
-        R=np.array(R),
-        T=np.array(T)
-    )
-
-    # Rectificar las imágenes
-    rectified_left, rectified_right = rectificar_imagenes(
-        left_image, right_image, leftCameraInfo, rightCameraInfo, R1, R2, P1, P2
-    )
+    # Aplicar remapeo a las imágenes
+    rectified_left = cv.remap(left_image, left_map1, left_map2, interpolation=cv.INTER_LINEAR)
+    rectified_right = cv.remap(right_image, right_map1, right_map2, interpolation=cv.INTER_LINEAR)
 
     # Mostrar las imágenes rectificadas
     cv.imshow('Rectified Left', rectified_left)

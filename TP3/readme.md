@@ -37,7 +37,7 @@ ros2 run rviz2 rviz2
 ## Publicar la info de las camaras a un topico:
 Creamos un paquete "camera_info_publisher" que contiene al script publisher.py, que publica a un topico la info de las camaras izq y der obtenidas en la calibración.
 Compilamos y sourceamos el paquete con
-    colcon build --packages-select camera_info_publisher && source install/setup.bash
+    colcon build --packages-select camera_info_publisher && source install/setup.bash &&  ros2 run camera_info_publisher points_cloud_publisher
 Ejecutamos el script para publicar la info con
     ros2 run camera_info_publisher publisher
 
