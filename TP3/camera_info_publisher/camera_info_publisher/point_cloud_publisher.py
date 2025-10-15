@@ -5,6 +5,9 @@ from std_msgs.msg import Header
 import yaml
 import numpy as np
 
+
+
+
 class PointsCloudPublisher(Node):
     def __init__(self):
         super().__init__('point_cloud_publisher')
