@@ -11,7 +11,7 @@ path_calibracion_left = './calibrationData/left.yaml'
 path_calibracion_right = './calibrationData/right.yaml'
 
 
-def rectify(left_image, right_image, leftCameraInfo, rightCameraInfo):
+def rectify(left_image, right_image, leftCameraInfo, rightCameraInfo, show_images=False):
     # Obtener las dimensiones de las imágenes
     image_size = (leftCameraInfo['image_width'], leftCameraInfo['image_height'])
 
@@ -61,9 +61,18 @@ def rectify(left_image, right_image, leftCameraInfo, rightCameraInfo):
     rectified_left = cv2.remap(left_image, left_map1, left_map2, interpolation=cv2.INTER_LINEAR)
     rectified_right = cv2.remap(right_image, right_map1, right_map2, interpolation=cv2.INTER_LINEAR)
 
+    if (show_images):
+        cv2.imshow('Rectified Left', rectified_left)
+        cv2.imshow('Rectified Right', rectified_right)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+    cv2.imwrite(f'{output_dir}/left_rectified.png', rectified_left)
+    cv2.imwrite(f'{output_dir}/right_rectified.png', rectified_right)
+
     return rectified_left, rectified_right
 
-def getFeatures(dir_out, left_img, right_img):
+def getFeatures(dir_out, left_img, right_img, show_images=False):
 
     # Obtenemos los keypoints
     fast = cv2.FastFeatureDetector_create(threshold=25, nonmaxSuppression=True)
@@ -79,17 +88,18 @@ def getFeatures(dir_out, left_img, right_img):
     img_left_kp = cv2.drawKeypoints(left_img, kp_left, None, color=(0,255,0))
     img_right_kp = cv2.drawKeypoints(right_img, kp_right, None, color=(0,255,0))
 
-    cv2.imshow('Izquierda - FAST keypoints', img_left_kp)
-    cv2.imshow('Derecha - FAST keypoints', img_right_kp)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    if (show_images):
+        cv2.imshow('Izquierda - FAST keypoints', img_left_kp)
+        cv2.imshow('Derecha - FAST keypoints', img_right_kp)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
 
     cv2.imwrite(f'{output_dir}/left_keypoints.png', img_left_kp)
     cv2.imwrite(f'{output_dir}/right_keypoints.png', img_right_kp)
 
     return kp_left, kp_right, des_left, des_right
 
-def getMatches(left_img, right_img, kp_left, kp_right, des_left, des_right):
+def getMatches(left_img, right_img, kp_left, kp_right, des_left, des_right, show_images=False):
 
     # Generamos el Matcher
     bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
@@ -104,14 +114,14 @@ def getMatches(left_img, right_img, kp_left, kp_right, des_left, des_right):
     img_all_matches = cv2.drawMatches(left_img, kp_left, right_img, kp_right, all_matches, None)
     img_le_matches = cv2.drawMatches(left_img, kp_left, right_img, kp_right, le_matches, None)
 
-    cv2.imshow("Todos los matches", img_all_matches)
-    cv2.imshow("Matches con distancia < 30", img_le_matches)
+    if (show_images):
+        cv2.imshow("Todos los matches", img_all_matches)
+        cv2.imshow("Matches con distancia < 30", img_le_matches)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
 
-    cv2.imwrite("matches_todos.png", img_all_matches)
-    cv2.imwrite("matches_dist_menor_30.png", img_le_matches)
-
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    cv2.imwrite(f'{output_dir}/matches_todos.png', img_all_matches)
+    cv2.imwrite(f'{output_dir}/matches_dist_menor_30.png', img_le_matches)
 
     return all_matches, le_matches
 
@@ -127,6 +137,9 @@ def triangulate(kp_left, kp_right, good_matches, leftCameraInfo, rightCameraInfo
     # Realizamos la triangulacion
     points4D = cv2.sfm.triangulatePoints(P1, P2, src_pts.T, dst_pts.T)
     points3D = (points4D[:3] / points4D[3]).T
+
+    # Escribimos el array de puntos 3D en un archivo .npy
+    np.save(f'{output_dir}/points3D.npy', points3D)
 
     return points3D
 
@@ -178,24 +191,16 @@ def main(args=None):
     # Obtener las imagenes rectificadas
     rectified_left, rectified_right = rectify(left_img, right_img, leftCameraInfo, rightCameraInfo)
 
-
-
-
     # Obtenemos los features y descriptores
     kp_left, kp_right, des_left, des_right = getFeatures(output_dir, rectified_left, rectified_right)
 
-#     # Obtenemos los matches
-#     all_matches, le_matches = getMatches(rectified_left, rectified_right, kp_left, kp_right, des_left, des_right)
+    # Obtenemos los matches
+    all_matches, le_matches = getMatches(rectified_left, rectified_right, kp_left, kp_right, des_left, des_right)
 
-#     # Realizamos la triangulación
-#     points3D = triangulate(kp_left, kp_right, le_matches, leftCameraInfo, rightCameraInfo)
+    # Realizamos la triangulación
+    points3D = triangulate(kp_left, kp_right, le_matches, leftCameraInfo, rightCameraInfo)
 
 if __name__ == '__main__':
     main()
 
 
-    # # Mostrar las imágenes rectificadas
-    # cv2.imshow('Rectified Left', rectified_left)
-    # cv2.imshow('Rectified Right', rectified_right)
-    # cv2.waitKey(10000)
-    # cv2.destroyAllWindows()

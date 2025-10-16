@@ -5,5 +5,7 @@ examples
 .venv
 TP3/archivos
 TP3/image_pipeline
-
+TP3/opencv
+TP3/opencv_contrib
+TP3/__pycache__
 
