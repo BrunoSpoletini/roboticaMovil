@@ -26,7 +26,8 @@ setup(
         'console_scripts': [
             'publisher = camera_info_publisher.publisher:main',
             'stereo_image_saver = camera_info_publisher.saver:main',
-            'point_cloud_publisher = camera_info_publisher.point_cloud_publisher:main',
+            'point_cloud_publisher = camera_info_publisher.points_cloud_publisher:main',
+            'ground_truth_listener = camera_info_publisher.ground_truth_listener'
         ],
     },
 )
