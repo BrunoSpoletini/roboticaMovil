@@ -4,6 +4,7 @@ from sensor_msgs.msg import CameraInfo, Image, PointCloud, PointField, PointClou
 from std_msgs.msg import Header
 import yaml
 import numpy as np
+import os
 
 
 
@@ -12,16 +13,32 @@ class PointsCloudPublisher(Node):
     def __init__(self):
         super().__init__('point_cloud_publisher')
 
-        # leemos de un archivo .npy los puntos 3D
-        self.points = np.load('/home/bruno/roboticaMovil/TP3/points3D.npy', allow_pickle=True)
 
-        self.pcd_publisher = self.create_publisher(PointCloud2, 'point_cloud_ejd', 10)
-        timer_period = 1/30.0
+        self.point_cloud_dir = '/home/bruno/roboticaMovil/TP3/point_clouds/'
+        self.files = sorted([
+            os.path.join(self.point_cloud_dir, f) for f in os.listdir(self.point_cloud_dir) if f.endswith('.npy')
+        ])
+        self.current_file_index = 0
+
+        self.pcd_publisher = self.create_publisher(PointCloud2, 'point_cloud', 10)
+        timer_period = 0.5  # segundos
         self.timer = self.create_timer(timer_period, self.timer_callback)
 
     def timer_callback(self):
-        self.pcd = array_to_point_cloud(self.points, 'map')
+        if not self.files:
+            self.get_logger().warn('No point cloud files found in the directory.')
+            return
+
+        # Load the current point cloud file
+        file_path = self.files[self.current_file_index]
+        self.get_logger().info(f'Publishing point cloud from file: {file_path}')
+        points = np.load(file_path)
+
+        # Convert to PointCloud2 message
+        self.pcd = array_to_point_cloud(points, 'map')
         self.pcd_publisher.publish(self.pcd)
+
+        self.current_file_index = (self.current_file_index + 1) % len(self.files)
 
 def array_to_point_cloud(points, parent_frame):
     header = Header()
