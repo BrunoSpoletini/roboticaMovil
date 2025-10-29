@@ -59,7 +59,6 @@ class StereoCameraPublisher(Node):
         self.right_info_pub.publish(self.right_camera_info)
         self.right_image_pub.publish(msg)
 
-
 def main(args=None):
     rclpy.init(args=args)
     node = StereoCameraPublisher()

@@ -1,47 +1,83 @@
 import rclpy
-import cv2
-import argparse
-import numpy as np
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
-from geometry_msgs.msg import PoseStamped
+import cv2
+import os
 
-# Nodo encargado de escuhcar las imagenes crudas
-class RawImagesListener(Node):
-    def __init__(self, outputDir):
-        super().__init__('ground_truth_listener')
+class ImageSaver(Node):
+    def __init__(self, output_dir):
+        super().__init__('image_saver')
         self.bridge = CvBridge()
-        # Variables de estado
-        self.index = 0
-        self.poses = []
-        self.outputDir = outputDir
-        # Creamos subcriptores para almacenar las imagenes crudas
-        self.sub = self.create_subscription(Image, '/cam0/image_raw', self.saveImageCallback, 10)
-        self.sub = self.create_subscription(Image, '/cam1/image_raw', self.saveImageCallback, 10)
 
-    # Almacena la imagen cruda en un archivo
-    def saveImageCallback(self, msg):
-        cv_img = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
-        cv2.imwrite(f"{self.outputDir}/left_{self.index:04d}.png", cv_img)
-        self.index += 1
+        # Crear directorio de salida
+        self.output_dir = output_dir
+        os.makedirs(os.path.join(output_dir, "left"), exist_ok=True)
+        os.makedirs(os.path.join(output_dir, "right"), exist_ok=True)
 
-# Parsea los argumentos de entrada
-def parse_args():
-    parser = argparse.ArgumentParser(description="Directorio donde las imagenes crudas del ground-truth")
-    parser.add_argument("--o", type=str, default="RawImages", help="Directorio donde guardar las imagenes crudas")
-    return parser.parse_args()
+        # Índices de imagen guardadas
+        self.saved_left = 0
+        self.saved_right = 0
+
+        # Suscribirse a los tópicos de las cámaras
+        self.sub_cam0 = self.create_subscription(
+            Image,
+            '/cam0/image_raw',
+            self.callback_cam0,
+            10
+        )
+        self.sub_cam1 = self.create_subscription(
+            Image,
+            '/cam1/image_raw',
+            self.callback_cam1,
+            10
+        )
+
+        # Para evitar guardar duplicados
+        self.last_stamp_cam0 = None
+        self.last_stamp_cam1 = None
+
+    def callback_cam0(self, msg):
+        stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        if stamp == self.last_stamp_cam0:
+            return  # Ya la guardamos
+        self.last_stamp_cam0 = stamp
+
+        cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        filename = os.path.join(self.output_dir, "cam0", f"img_{self.saved_left:06d}.png")
+        cv2.imwrite(filename, cv_image)
+        self.saved_left += 1
+        self.get_logger().info(f"💾 Guardada {filename}")
+
+    def callback_cam1(self, msg):
+        stamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        if stamp == self.last_stamp_cam1:
+            return  # Ya la guardamos
+        self.last_stamp_cam1 = stamp
+
+        cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        filename = os.path.join(self.output_dir, "cam1", f"img_{self.saved_right:06d}.png")
+        cv2.imwrite(filename, cv_image)
+        self.saved_right += 1
+        self.get_logger().info(f"💾 Guardada {filename}")
 
 def main(args=None):
-    # Parseamos los argumentos
-    outputDir = parse_args()
+    import sys
+    if len(sys.argv) < 2:
+        print("Uso: ros2 run camera_info_publisher save_images_node.py <directorio_salida>")
+        return
 
-    # Inicializamoos el nodo
+    output_dir = sys.argv[1]
+    
     rclpy.init(args=args)
-    node = RawImagesListener(outputDir)
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    node = ImageSaver(output_dir)
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
