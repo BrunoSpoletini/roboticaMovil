@@ -217,6 +217,9 @@ class Script:
 
         return points_world.astype(np.float32)
 
+    # def to_points_cloud2(self, points, frame_id='map'):
+
+
 
     # Computamos el mapa de disparidad
     def computeDisparityMap(self, left_image, right_image):
@@ -429,6 +432,7 @@ def main():
 
             # Pasamos los puntos filtrados al sistema de coordenadas global
             filtered_pts_3D_world = script.to_world(filtered_pts_3D, poses[i])
+
             np.save(f"{output_dir}/Filtered3DPoints/filtered_points3D_{i:04d}.npy", filtered_pts_3D_world)
 
             # Ejercicio G

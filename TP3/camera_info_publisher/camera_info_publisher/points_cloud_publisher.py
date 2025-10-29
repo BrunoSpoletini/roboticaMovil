@@ -29,7 +29,7 @@ class PointCloudPublisher(Node):
         self.get_logger().info(f'Publishing {file_path}')
         points = np.load(file_path)
 
-        # Transformar a mundo y filtrar NaNs si es necesario
+        # Transformar a mundo y filtrar NaNs
         if points.ndim == 3:
             pts = points.reshape(-1, 3)
         else:
