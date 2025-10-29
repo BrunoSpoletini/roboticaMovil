@@ -9,10 +9,12 @@ import rosbag2_py
 from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
 from rclpy.serialization import deserialize_message
+from sensor_msgs.msg import PointCloud2
+from geometry_msgs.msg import PoseStamped
+from nav_msgs.msg import Path
+import rclpy
+from rclpy.node import Node
 
-
-global cam_info_l
-global cam_info_r
 
 # Cargamos la calibracion de las camaras
 def load_calib(path):
@@ -296,176 +298,299 @@ class Script:
 
         return camera_pose_l, camera_pose_r
 
+class ImagePublisher(Node):
+    def __init__(self, input_dir, output_dir, save):
+        super().__init__('image_publisher')
+
+        # Creamos los Publishers
+        # Imagenes
+        self.img_pub_l = self.create_publisher(Image, '/Publisher/Left/raw_img', 10)
+        self.img_pub_r = self.create_publisher(Image, '/Publisher/Right/raw_img', 10)
+        # Imagenes Rectificadas
+        self.rect_img_pub_l = self.create_publisher(Image, '/Publisher/Left/rect_img', 10)
+        self.rect_img_pub_r = self.create_publisher(Image, '/Publisher/Right/rect_img', 10)
+        # Keypoints
+        self.keypoints_img_pub_l = self.create_publisher(Image, '/Publisher/Left/keypoints_img', 10)
+        self.keypoints_img_pub_r = self.create_publisher(Image, '/Publisher/Right/keypoints_img', 10)
+        # Matches
+        self.all_matches_pub = self.create_publisher(Image, '/Publisher/all_matches', 10)
+        self.good_matches_pub = self.create_publisher(Image, '/Publisher/good_matches', 10)
+        self.filtered_matches_pub = self.create_publisher(Image, '/Publisher/filtered_matches', 10)
+        # Transformed Points
+        self.transformed_points_pub = self.create_publisher(Image, '/Publisher/transformed_points', 10)
+        # Mapa de disparidad
+        self.disparity_pub = self.create_publisher(Image, '/Publisher/disparity_map', 10)
+        # Nube de puntos
+        self.good_points_3D_pub = self.create_publisher(PointCloud2, '/Publisher/good_points', 10)
+        self.filtered_points_3D_pub = self.create_publisher(PointCloud2, '/Publisher/filtered_points', 10)
+        # Escena Rebuildeada
+        self.rebuilded_scene_pub = self.create_publisher(PointCloud2, '/Publisher/rebuilded_scene', 10)
+        # Poses
+        self.poses_pub = self.create_publisher(Image, '/Publisher/poses', 10)
+        # Trayectoria
+        self.trayectory_pub = self.create_publisher(Path, '/Publisher/trayectory', 10)
+
+
+        # Generamos los path de los elementos del input
+        bag_path = os.path.join(input_dir, "rosbag.db3")
+        poses_path = os.path.join(input_dir, "poses.txt")
+        calib_path_l = os.path.join(input_dir, "calibration_left.yaml")
+        calib_path_r = os.path.join(input_dir, "calibration_right.yaml")
+
+        # Cargamos la informacion del input
+        poses = np.loadtxt(poses_path)
+        cam_info_l = load_calib(calib_path_l)
+        cam_info_r = load_calib(calib_path_r)
+
+        # Definimos el largo y los indices
+        len = round(poses.size / 8)
+        indices = range(len)
+        if save:
+            indices = [random.randint(0, len - 1)]
+
+        # Generamos
+        script = Script(cam_info_l, cam_info_r)
+
+        # Cargamos la informacion de la camara
+        script.loadCameraInfoVariables()
+
+        # Cargamos las imagenes de la rosbag
+        imgs_l, imgs_r = script.loadImagesFromBag(bag_path)
+
+        #
+        self.trayectory_msg = Path()
+        self.trayectory_msg.header.frame_id = "map"
+
+        for i in indices:
+            if save or i % 10 == 0:
+                print(f"Procesando frame {i+1}/{round(poses.size / 8)}...")
+
+                # Cargamos las imagenes
+                img_l = imgs_l[0]
+                img_r = imgs_r[1]
+
+                # Guardamos o publicamos las imagenes
+                if save:
+                    cv2.imwrite(f'{output_dir}/Rectified/Left/rectified_left_{i:04d}.png', rect_img_l)
+                    cv2.imwrite(f'{output_dir}/Rectified/Right/rectified_right_{i:04d}.png', rect_img_r)
+                else:
+                    self.img_pub_l.publish(imgs_l)
+                    self.img_pub_r.publish(imgs_r)
+
+                # Ejercicio A
+
+                # Rectificamos las imagenes
+                rect_img_l, rect_img_r = script.rectify(img_l, img_r)
+
+                # Guardamos o publicamos las imagenes rectificadas
+                if save:
+                    cv2.imwrite(f'{output_dir}/Rectified/Left/rectified_left_{i:04d}.png', rect_img_l)
+                    cv2.imwrite(f'{output_dir}/Rectified/Right/rectified_right_{i:04d}.png', rect_img_r)
+                else:
+                    self.rect_img_pub_l.publish(rect_img_l)
+                    self.rect_img_pub_r.publish(rect_img_r)
+                
+                # Ejercicio B
+
+                # Obtenemos los features 
+                key_pts_l, key_pts_r = script.getFeatures(rect_img_l, rect_img_r)
+
+                # Imprimimos los resultados
+                img_key_pts_l = cv2.drawKeypoints(rect_img_l, key_pts_l, None, color=(0,255,0))
+                img_key_pts_r = cv2.drawKeypoints(rect_img_r, key_pts_r, None, color=(0,255,0))
+
+                # Guardamos o publicamos los keypoints
+                if save:
+                    cv2.imwrite(f'{output_dir}/Keypoints/Left/keypoints_left_{i:04d}.png', img_key_pts_l)
+                    cv2.imwrite(f'{output_dir}/Keypoints/Right/keypoints_right_{i:04d}.png', img_key_pts_r)
+                else:
+                    self.keypoints_img_pub_l.publish(img_key_pts_l)
+                    self.keypoints_img_pub_r.publish(img_key_pts_r)
+
+                # Ejercicio C
+
+                # Obtenemos todos los matches
+                all_matches = script.getMatches()
+
+                # Filtramos los matches buenos con distancia mayor a 30
+                good_matches = [m for m in all_matches if m.distance < 30]
+
+                # Imprimimos los resultados
+                img_all_matches = cv2.drawMatches(rect_img_l, key_pts_l, img_r, key_pts_r, all_matches, None)
+                img_good_matches = cv2.drawMatches(rect_img_r, key_pts_l, img_r, key_pts_r, good_matches, None)
+
+                # Guardamos o publicamos todos los matches y los matches buenos
+                if save:
+                    cv2.imwrite(f'{output_dir}/Matches/all_matches_{i:04d}.png', img_all_matches)
+                    cv2.imwrite(f'{output_dir}/Matches/good_matches_{i:04d}.png', img_good_matches)
+                else:
+                    self.all_matches_pub.publish(img_all_matches)
+                    self.good_matches_pub.publish(img_good_matches)
+
+                # Ejercicio D
+
+                # Obtenems los puntos de los matches buenos
+                good_pts_l, good_pts_r = script.getMatchesPoints(good_matches)
+
+                # Triangulamos los puntos
+                good_pts_3D = script.triangulate(good_pts_l, good_pts_r)
+
+                # Ejercicio E
+
+                # Filtramos los matches espureos
+                filtered_matches = script.filterMatches(good_matches, good_pts_l, good_pts_r)
+
+                # Generamos la imagen con los matches filtrados
+                img_filtered_matches = cv2.drawMatches(rect_img_l, key_pts_l, rect_img_r, key_pts_r, filtered_matches, None)
+
+                # Guardamos o publicamos los matches filtrados
+                if save:
+                    cv2.imwrite(f'{output_dir}/Matches/filtered_matches_{i:04d}.png', img_filtered_matches)
+                else:
+                    self.filtered_matches_pub.publish(img_filtered_matches)
+
+                # Transformamos los puntos a la imagen derecha utilizando la matriz M
+                filtered_pts_l, filtered_pts_r = script.getMatchesPoints(filtered_matches)
+                filtered_pts_transformed_r = script.transformPoints(filtered_pts_l)
+
+                # Dibujamos círculos verdes para los puntos transformados
+                img_transformed = rect_img_r.copy()
+                for pt in filtered_pts_transformed_r:
+                    x, y = pt[0]
+                    cv2.circle(img_transformed, (int(x), int(y)), 4, (0, 255, 0), -1)
+
+                # Generamos o publicamos la imagen con los puntos transformados
+                if save:
+                    cv2.imwrite(f'{output_dir}/Transformed/transformed_points_r{i:04d}.png', img_transformed)
+                else:
+                    self.transformed_points_pub.publish(img_transformed)
+
+                # Ejercicio F
+
+                # Pasamos los puntos buenos al sistema de coordenadas global
+                good_pts_3d_world = script.to_world(good_pts_3D, poses[i])
+
+                # Guardamos o publicamos los puntos buenos 3d
+                if save:
+                    np.save(f"{output_dir}/3DPoints/good_points3D_{i:04d}.npy", good_pts_3d_world)
+                else:
+                    self.good_points_3D_pub.publish(good_pts_3d_world)
+
+                # Triangulamos los puntos filtrados
+                filtered_pts_3D = script.triangulate(filtered_pts_l, filtered_pts_r)
+
+                # Pasamos los puntos filtrados al sistema de coordenadas global
+                filtered_pts_3D_world = script.to_world(filtered_pts_3D, poses[i])
+
+                # Guardamos o publicamos los puntos filtrados 3d
+                if save:
+                    np.save(f"{output_dir}/Filtered3DPoints/filtered_points3D_{i:04d}.npy", filtered_pts_3D_world)
+                else:
+                    self.filtered_points_3D_pub.publish(filtered_pts_3D_world)
+
+                # Ejercicio G
+
+                # Obtenemos el mapa de disparidad
+                disparity_map = script.computeDisparityMap(rect_img_l, rect_img_r)
+
+                # Guardamos o publicamos el mapa de disparidad
+                if save:
+                    cv2.imwrite(f'{output_dir}/Disparities/disparity_map_{i:04d}.png', disparity_map)
+                else:
+                    self.disparity_pub.publish(disparity_map)
+
+                # Ejercicio H
+
+                # Rebuildeamos la escena 3D
+                rebuilded_pts_3D = script.rebuildDense3DScene()
+
+                # Ejercicio I
+                rebuilded_pts_3D_world = script.to_world(rebuilded_pts_3D, poses[i])
+
+                # Guardamos o publicamos la escena rebuildeada
+                if save:
+                    np.save(f'{output_dir}/RebiuldedScenes/rebuilded_pts_3D_world_{i:04d}.npy', rebuilded_pts_3D_world)
+                else:
+                    self.rebuilded_scene_pub.publish(rebuilded_pts_3D_world)
+
+                # Ejercicio J
+
+                # Subindice i
+
+                # Agregamos a la imagen izquierda los poses de las camaras
+                img_poses = rect_img_r.copy()
+
+                camera_pose_l, camera_pose_r = script.stimatePose(filtered_pts_l, filtered_pts_r)
+
+                # Dibujamos los centros de las camaras
+                cv2.circle(img_poses, camera_pose_l, 8, (0,0,255), -1)
+                cv2.circle(img_poses, camera_pose_r, 8, (255,0,0), -1)
+
+                # Dibujamos una baseline
+                cv2.line(img_poses, camera_pose_l, camera_pose_r, (0,0,0), 2, cv2.LINE_AA)
+
+                # Guardamos o publicamos las poses de la camara
+                if save:
+                    cv2.imwrite(f'{output_dir}/CamerasPoses/cameras_pose_{i:04d}.png', img_poses)
+                else:
+                    self.poses_pub.publish(img_poses)
+
+                # Subindice ii
+
+                if save:
+                    t = poses[i][1:4]
+                    q = poses[i][4:]
+
+                    pose_stamped = PoseStamped()
+                    pose_stamped.header.frame_id = "map"
+                    pose_stamped.header.stamp = self.get_clock().now().to_msg()
+
+                    pose_stamped.pose.position.x = t[0]
+                    pose_stamped.pose.position.y = t[1]
+                    pose_stamped.pose.position.z = t[2]
+
+                    pose_stamped.pose.orientation.x = q[0]
+                    pose_stamped.pose.orientation.y = q[1]
+                    pose_stamped.pose.orientation.z = q[2]
+                    pose_stamped.pose.orientation.w = q[3]
+
+                    self.trayectory_msg.poses.append(pose_stamped)
+                    self.trayectory_msg.header.stamp = self.get_clock().now().to_msg()
+                    
+                    self.trayectory_pub.publish(self.trayectory_msg)
+
 def main():
 
     if len(sys.argv) < 4:
-        print("Uso: python3 script.py <input_dir> <output_dir> [--random True]")
+        print("Uso: python3 script.py <input_dir> <output_dir> [--save True]")
         sys.exit(1)
 
     input_dir = sys.argv[1]
     output_dir = sys.argv[2]
-    use_random = len(sys.argv) > 3 and sys.argv[3].lower() == "true"
+    save = len(sys.argv) > 3 and sys.argv[3].lower() == "true"
 
-    bag_path = os.path.join(input_dir, "rosbag.db3")
-    poses_path = os.path.join(input_dir, "poses.txt")
-    calib_path_l = os.path.join(input_dir, "calibration_left.yaml")
-    calib_path_r = os.path.join(input_dir, "calibration_right.yaml")
-
-    os.makedirs(os.path.join(output_dir, "Rectified/Left"), exist_ok=True)
-    os.makedirs(os.path.join(output_dir, "Rectified/Right"), exist_ok=True)
-    os.makedirs(os.path.join(output_dir, "Keypoints/Left"), exist_ok=True)
-    os.makedirs(os.path.join(output_dir, "Keypoints/Right"), exist_ok=True)
-    os.makedirs(os.path.join(output_dir, "Matches"), exist_ok=True)
-    os.makedirs(os.path.join(output_dir, "Transformed"), exist_ok=True)
-    os.makedirs(os.path.join(output_dir, "3DPoints"), exist_ok=True)
-    os.makedirs(os.path.join(output_dir, "Filtered3DPoints"), exist_ok=True)
-    os.makedirs(os.path.join(output_dir, "Disparities"), exist_ok=True)
-    os.makedirs(os.path.join(output_dir, "RebiuldedScenes"), exist_ok=True)
-    os.makedirs(os.path.join(output_dir, "CamerasPoses"), exist_ok=True)
-
-    # Cargamos la informacion input
-    poses = np.loadtxt(poses_path)
-    cam_info_l = load_calib(calib_path_l)
-    cam_info_r = load_calib(calib_path_r)
-
-    indices = range(round(poses.size / 8))
-    if use_random:
-        indices = [random.randint(0, round(poses.size / 8)-1)]
-
-    script = Script(cam_info_l, cam_info_r)
-
-    script.loadCameraInfoVariables()
-
-    imgs_l, imgs_r = script.loadImagesFromBag(bag_path)
-
-    for i in indices:
-        if use_random or i % 10 == 0:
-            print(f"Procesando frame {i+1}/{round(poses.size / 8)}...")
-
-            # Cargamos las imagenes
-            img_l = imgs_l[0]
-            img_r = imgs_r[1]
-
-            # Ejercicio A
-
-            # Rectificamos las imagenes
-            rect_img_l, rect_img_r = script.rectify(img_l, img_r)
-
-            # Guardamos las imagenes rectificadas
-            if use_random:
-                cv2.imwrite(f'{output_dir}/Rectified/Left/rectified_left_{i:04d}.png', rect_img_l)
-                cv2.imwrite(f'{output_dir}/Rectified/Right/rectified_right_{i:04d}.png', rect_img_r)
-            
-            # Ejercicio B
-
-            # Obtenemos los features 
-            key_pts_l, key_pts_r = script.getFeatures(rect_img_l, rect_img_r)
-
-            # Imprimimos los resultados
-            img_key_pts_l = cv2.drawKeypoints(rect_img_l, key_pts_l, None, color=(0,255,0))
-            img_key_pts_r = cv2.drawKeypoints(rect_img_r, key_pts_r, None, color=(0,255,0))
-
-            if use_random:
-                cv2.imwrite(f'{output_dir}/Keypoints/Left/keypoints_left_{i:04d}.png', img_key_pts_l)
-                cv2.imwrite(f'{output_dir}/Keypoints/Right/keypoints_right_{i:04d}.png', img_key_pts_r)
-
-            # Ejercicio C
-
-            # Obtenemos todos los matches
-            all_matches = script.getMatches()
-
-            # Filtramos los matches buenos con distancia mayor a 30
-            good_matches = [m for m in all_matches if m.distance < 30]
-
-            # Imprimimos los resultados
-            img_all_matches = cv2.drawMatches(rect_img_l, key_pts_l, img_r, key_pts_r, all_matches, None)
-            img_good_matches = cv2.drawMatches(rect_img_r, key_pts_l, img_r, key_pts_r, good_matches, None)
-
-            if use_random:
-                cv2.imwrite(f'{output_dir}/Matches/all_matches_{i:04d}.png', img_all_matches)
-                cv2.imwrite(f'{output_dir}/Matches/good_matches_{i:04d}.png', img_good_matches)
-
-            # Ejercicio D
-
-            # Obtenems los puntos de los matches buenos
-            good_pts_l, good_pts_r = script.getMatchesPoints(good_matches)
-
-            # Triangulamos los puntos
-            good_pts_3D = script.triangulate(good_pts_l, good_pts_r)
-
-            # Ejercicio E
-
-            # Filtramos los matches espureos
-            filtered_matches = script.filterMatches(good_matches, good_pts_l, good_pts_r)
-
-            # Generamos la imagen con los matches filtrados
-            img_filtered_matches = cv2.drawMatches(rect_img_l, key_pts_l, rect_img_r, key_pts_r, filtered_matches, None)
-
-            if use_random:
-                cv2.imwrite(f'{output_dir}/Matches/filtered_matches_{i:04d}.png', img_filtered_matches)
-
-            # Transformamos los puntos a la imagen derecha utilizando la matriz M
-            filtered_pts_l, filtered_pts_r = script.getMatchesPoints(filtered_matches)
-            filtered_pts_transformed_r = script.transformPoints(filtered_pts_l)
-
-            # Dibujamos círculos verdes para los puntos transformados
-            img_transformed = rect_img_r.copy()
-            for pt in filtered_pts_transformed_r:
-                x, y = pt[0]
-                cv2.circle(img_transformed, (int(x), int(y)), 4, (0, 255, 0), -1)
-
-            # Generamos la imagen con los puntos transformados
-            if use_random:
-                cv2.imwrite(f'{output_dir}/Transformed/transformed_points_r{i:04d}.png', img_transformed)
-
-            # Ejercicio F
-
-            # Pasamos los puntos buenos al sistema de coordenadas global
-            good_pts_3d_world = script.to_world(good_pts_3D, poses[i])
-            np.save(f"{output_dir}/3DPoints/good_points3D_{i:04d}.npy", good_pts_3d_world)
-
-            # Triangulamos los puntos filtrados
-            filtered_pts_3D = script.triangulate(filtered_pts_l, filtered_pts_r)
-
-            # Pasamos los puntos filtrados al sistema de coordenadas global
-            filtered_pts_3D_world = script.to_world(filtered_pts_3D, poses[i])
-            np.save(f"{output_dir}/Filtered3DPoints/filtered_points3D_{i:04d}.npy", filtered_pts_3D_world)
-
-            # Ejercicio G
-
-            # Obtenemos el mapa de disparidad
-            disparity_map = script.computeDisparityMap(rect_img_l, rect_img_r)
-
-            # Guardamos el mapa de disparidad
-            if use_random:
-                cv2.imwrite(f'{output_dir}/Disparities/disparity_map_{i:04d}.png', disparity_map)
-
-            # Ejercicio H
-
-            # Rebuildeamos la escena 3D
-            rebuilded_pts_3D = script.rebuildDense3DScene()
-
-            # Ejercicio I
-            rebuilded_pts_3D_world = script.to_world(rebuilded_pts_3D, poses[i])
-            np.save(f'{output_dir}/RebiuldedScenes/rebuilded_pts_3D_world_{i:04d}.npy', rebuilded_pts_3D_world)
-            # np.save(f'{output_dir}/RebiuldedScenes/rebuilded_pts_3D_world.npy', rebuilded_pts_3D)
-
-            # Ejercicio J
-
-            # Agregamos a la imagen izquierda los poses de las camaras
-            img_poses = img_r.copy()
-
-            camera_pose_l, camera_pose_r = script.stimatePose(filtered_pts_l, filtered_pts_r)
-
-            # Dibujamos los centros de las camaras
-            cv2.circle(img_poses, camera_pose_l, 8, (0,0,255), -1)
-            cv2.circle(img_poses, camera_pose_r, 8, (255,0,0), -1)
-
-            # Dibujamos una baseline
-            cv2.line(img_poses, camera_pose_l, camera_pose_r, (0,0,0), 2, cv2.LINE_AA)
-
-            # Mostrar y guardar
-            cv2.imwrite(f'{output_dir}/CamerasPoses/cameras_pose_{i:04d}.png', img_poses)
+    if save:
+        os.makedirs(os.path.join(output_dir, "Rectified/Left"), exist_ok=True)
+        os.makedirs(os.path.join(output_dir, "Rectified/Right"), exist_ok=True)
+        os.makedirs(os.path.join(output_dir, "Keypoints/Left"), exist_ok=True)
+        os.makedirs(os.path.join(output_dir, "Keypoints/Right"), exist_ok=True)
+        os.makedirs(os.path.join(output_dir, "Matches"), exist_ok=True)
+        os.makedirs(os.path.join(output_dir, "Transformed"), exist_ok=True)
+        os.makedirs(os.path.join(output_dir, "3DPoints"), exist_ok=True)
+        os.makedirs(os.path.join(output_dir, "Filtered3DPoints"), exist_ok=True)
+        os.makedirs(os.path.join(output_dir, "Disparities"), exist_ok=True)
+        os.makedirs(os.path.join(output_dir, "RebiuldedScenes"), exist_ok=True)
+        os.makedirs(os.path.join(output_dir, "CamerasPoses"), exist_ok=True)
+    
+    rclpy.init()
+    node = ImagePublisher(input_dir, output_dir, save)
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
