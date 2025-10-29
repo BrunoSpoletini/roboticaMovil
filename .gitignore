@@ -8,4 +8,6 @@ TP3/image_pipeline
 TP3/opencv
 TP3/opencv_contrib
 TP3/__pycache__
-
+TP3/input/
+TP3/output/
+TP3/numpyFiles/
