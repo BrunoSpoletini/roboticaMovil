@@ -12,22 +12,18 @@ class PointCloudPublisher(Node):
         self.input_dir = input_dir
         self.scale = scale
 
-        # Cargamos todos los archivos .npy de la carpeta
-        self.files = sorted([os.path.join(input_dir, f) 
-                             for f in os.listdir(input_dir) if f.endswith('.npy')])
-        self.index = 0
 
-        self.pub = self.create_publisher(PointCloud2, 'point_cloud', 10)
-        self.timer = self.create_timer(0.5, self.timer_callback)
+        self.sub_points_cloud = 
+            self.create_subscription(PointCloud2,'/Publisher/filtered_points',self.instancia_nube_puntos_callback,10)
 
-    def timer_callback(self):
-        if not self.files:
-            self.get_logger().warn('No point cloud files found.')
-            return
+        self.pub = self.create_publisher(PointCloud2, 'colored_point_cloud', 10)
 
-        file_path = self.files[self.index]
+
+    def instancia_nube_puntos_callback(self, msg):
+
+
         self.get_logger().info(f'Publishing {file_path}')
-        points = np.load(file_path)
+        points = msg
 
         # Transformar a mundo y filtrar NaNs
         if points.ndim == 3:
@@ -44,6 +40,7 @@ class PointCloudPublisher(Node):
         self.pub.publish(msg)
 
         self.index = (self.index + 1) % len(self.files)
+
 
     @staticmethod
     def points_to_pointcloud2(points, frame_id='map'):

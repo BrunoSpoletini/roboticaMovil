@@ -269,6 +269,63 @@ class Script:
         points3D = cv2.reprojectImageTo3D(self.disparity, self.Q).astype(np.float32)
         return points3D
 
+
+    def color_3d_points(self, points_3d, rect_img, Q):
+        # Obtenemos las coordenadas de la imagen para cada punto 3D
+        points_2d = cv2.projectPoints(points_3d, np.zeros((3, 1)), np.zeros((3, 1)), Q[:3, :3], np.zeros((5, 1)))[0].reshape(-1, 2).astype(int)
+
+        # Filtramos los puntos que están dentro de los límites de la imagen
+        h, w, _ = rect_img.shape
+        valid_mask = (points_2d[:, 0] >= 0) & (points_2d[:, 0] < w) & (points_2d[:, 1] >= 0) & (points_2d[:, 1] < h)
+        valid_points_3d = points_3d[valid_mask]
+        valid_points_2d = points_2d[valid_mask]
+
+        # Obtenemos los colores correspondientes de la imagen rectificada
+        colors = rect_img[valid_points_2d[:, 1], valid_points_2d[:, 0]]
+
+        # Creamos el PointCloud2 con colores
+        colored_point_cloud = self.points_to_pointcloud2(valid_points_3d, colors, frame_id='map')
+
+        return colored_point_cloud
+
+    def points_to_pointcloud2(self, points, colors=None, frame_id='map'):
+        header = Header()
+        header.stamp = rclpy.time.Time().to_msg()
+        header.frame_id = frame_id
+
+        fields = [
+            PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
+            PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
+            PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1)
+        ]
+
+        if colors is not None:
+            fields.append(PointField(name='rgb', offset=12, datatype=PointField.UINT32, count=1))
+            point_step = 16
+        else:
+            point_step = 12
+
+        msg = PointCloud2()
+        msg.header = header
+        msg.height = 1
+        msg.width = points.shape[0]
+        msg.fields = fields
+        msg.is_bigendian = False
+        msg.point_step = point_step
+        msg.row_step = msg.point_step * points.shape[0]
+        msg.is_dense = True
+
+        if colors is not None:
+            # Convertimos colores RGB a un solo valor UINT32
+            rgb_values = (colors[:, 0].astype(np.uint32) << 16) | (colors[:, 1].astype(np.uint32) << 8) | colors[:, 2].astype(np.uint32)
+            data = np.hstack((points.astype(np.float32), rgb_values.reshape(-1, 1).astype(np.uint32))).tobytes()
+        else:
+            data = points.astype(np.float32).tobytes()
+
+        msg.data = data
+
+        return msg
+
     # Estimamos la pose de las camaras
     def stimatePose(self, pts_l, pts_r):
 
@@ -374,8 +431,8 @@ class ImagePublisher(Node):
 
                 # Guardamos o publicamos las imagenes
                 if save:
-                    cv2.imwrite(f'{output_dir}/Rectified/Left/rectified_left_{i:04d}.png', rect_img_l)
-                    cv2.imwrite(f'{output_dir}/Rectified/Right/rectified_right_{i:04d}.png', rect_img_r)
+                    cv2.imwrite(f'{output_dir}/Rectified/Left/rectified_left_{i:04d}.png', imgs_l)
+                    cv2.imwrite(f'{output_dir}/Rectified/Right/rectified_right_{i:04d}.png', imgs_r)
                 else:
                     self.img_pub_l.publish(imgs_l)
                     self.img_pub_r.publish(imgs_r)
@@ -514,7 +571,8 @@ class ImagePublisher(Node):
                 if save:
                     np.save(f'{output_dir}/RebiuldedScenes/rebuilded_pts_3D_world_{i:04d}.npy', rebuilded_pts_3D_world)
                 else:
-                    self.rebuilded_scene_pub.publish(rebuilded_pts_3D_world)
+                    colored_rebuilded_pts_3D_world = color_3d_points(rebuilded_pts_3D_world, rect_img_l, script.Q)
+                    self.rebuilded_scene_pub.publish(colored_rebuilded_pts_3D_world)
 
                 # Ejercicio J
 
