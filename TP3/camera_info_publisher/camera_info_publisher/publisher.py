@@ -17,6 +17,10 @@ from rclpy.node import Node
 from std_msgs.msg import Header
 
 
+
+
+
+
 # Cargamos la calibracion de las camaras
 def load_calib(path):
     with open(path, 'r') as f:
@@ -140,9 +144,9 @@ class Script:
         key_pts_r = fast.detect(img_r, None)
 
         # Obtenemos los descriptores
-        brief = cv2.xfeatures2d.BriefDescriptorExtractor_create()
-        key_pts_l, des_l = brief.compute(img_l, key_pts_l)
-        key_pts_r, des_r = brief.compute(img_r, key_pts_r)
+        orb = cv2.ORB_create(nfeatures=1000)
+        key_pts_l, des_l = orb.detectAndCompute(img_l, None)
+        key_pts_r, des_r = orb.detectAndCompute(img_r, None)
 
         # Guardamos las variables a utilizar en otros metodos
         self.key_pts_l, self.key_pts_r, self.des_l, self.des_r = key_pts_l, key_pts_r, des_l, des_r
@@ -271,22 +275,24 @@ class Script:
         return points3D
 
 
-    def color_3d_points(self, points_3d, rect_img, Q):
-        # Obtenemos las coordenadas de la imagen para cada punto 3D
-        points_2d = cv2.projectPoints(points_3d, np.zeros((3, 1)), np.zeros((3, 1)), Q[:3, :3], np.zeros((5, 1)))[0].reshape(-1, 2).astype(int)
-
-        # Filtramos los puntos que están dentro de los límites de la imagen
+    def color_3d_points(self, points_3d, rect_img):
+        # Los puntos 3D tienen la misma estructura que la imagen (height x width x 3)
+        # Podemos usar directamente los índices para obtener los colores
         h, w, _ = rect_img.shape
-        valid_mask = (points_2d[:, 0] >= 0) & (points_2d[:, 0] < w) & (points_2d[:, 1] >= 0) & (points_2d[:, 1] < h)
-        valid_points_3d = points_3d[valid_mask]
-        valid_points_2d = points_2d[valid_mask]
-
-        # Obtenemos los colores correspondientes de la imagen rectificada
-        colors = rect_img[valid_points_2d[:, 1], valid_points_2d[:, 0]]
-
-        # Creamos el PointCloud2 con colores
-        colored_point_cloud = self.points_to_pointcloud2(valid_points_3d, colors, frame_id='map')
-
+        
+        # Reshape points_3d para tener la forma correcta
+        points_reshaped = points_3d.reshape(-1, 3)
+        colors_reshaped = rect_img.reshape(-1, 3)
+        
+        # Filtramos puntos inválidos (infinitos o con Z <= 0)
+        valid_mask = np.isfinite(points_reshaped).all(axis=1) & (points_reshaped[:, 2] > 0)
+        
+        valid_points = points_reshaped[valid_mask]
+        valid_colors = colors_reshaped[valid_mask]
+        
+        # Creamos el PointCloud2 con colores (BGR -> RGB)
+        colored_point_cloud = self.points_to_pointcloud2(valid_points, valid_colors[:, ::-1], frame_id='map')
+        
         return colored_point_cloud
 
     def points_to_pointcloud2(self, points, colors=None, frame_id='map'):
@@ -314,12 +320,27 @@ class Script:
         msg.is_bigendian = False
         msg.point_step = point_step
         msg.row_step = msg.point_step * points.shape[0]
-        msg.is_dense = True
+        msg.is_dense = False  # Set to False because we may have filtered some points
 
         if colors is not None:
-            # Convertimos colores RGB a un solo valor UINT32
-            rgb_values = (colors[:, 0].astype(np.uint32) << 16) | (colors[:, 1].astype(np.uint32) << 8) | colors[:, 2].astype(np.uint32)
-            data = np.hstack((points.astype(np.float32), rgb_values.reshape(-1, 1).astype(np.uint32))).tobytes()
+            r = colors[:, 0].astype(np.uint32)
+            g = colors[:, 1].astype(np.uint32)
+            b = colors[:, 2].astype(np.uint32)
+            rgb_values = (r << 16) | (g << 8) | b
+            
+            # Creamos un array estructurado para combinar xyz y rgb correctamente
+            cloud_data = np.zeros((points.shape[0],), dtype=[
+                ('x', np.float32),
+                ('y', np.float32),
+                ('z', np.float32),
+                ('rgb', np.uint32)
+            ])
+            cloud_data['x'] = points[:, 0]
+            cloud_data['y'] = points[:, 1]
+            cloud_data['z'] = points[:, 2]
+            cloud_data['rgb'] = rgb_values
+            
+            data = cloud_data.tobytes()
         else:
             data = points.astype(np.float32).tobytes()
 
@@ -362,6 +383,9 @@ class Script:
 class ImagePublisher(Node):
     def __init__(self, input_dir, output_dir, save):
         super().__init__('image_publisher')
+        
+        # Inicializamos el CvBridge para convertir imágenes numpy a ROS Image messages
+        self.bridge = CvBridge()
 
         if not save:
             # Creamos los Publishers
@@ -434,11 +458,11 @@ class ImagePublisher(Node):
 
                 # Guardamos o publicamos las imagenes
                 if save:
-                    cv2.imwrite(f'{output_dir}/Rectified/Left/rectified_left_{i:04d}.png', imgs_l)
-                    cv2.imwrite(f'{output_dir}/Rectified/Right/rectified_right_{i:04d}.png', imgs_r)
+                    cv2.imwrite(f'{output_dir}/Rectified/Left/rectified_left_{i:04d}.png', img_l)
+                    cv2.imwrite(f'{output_dir}/Rectified/Right/rectified_right_{i:04d}.png', img_r)
                 else:
-                    self.img_pub_l.publish(imgs_l)
-                    self.img_pub_r.publish(imgs_r)
+                    self.img_pub_l.publish(self.numpy_to_ros_image(img_l))
+                    self.img_pub_r.publish(self.numpy_to_ros_image(img_r))
 
                 # Ejercicio A
                 print(f"Rectificando imagenes {i+1}/{len}...")
@@ -451,8 +475,8 @@ class ImagePublisher(Node):
                     cv2.imwrite(f'{output_dir}/Rectified/Left/rectified_left_{i:04d}.png', rect_img_l)
                     cv2.imwrite(f'{output_dir}/Rectified/Right/rectified_right_{i:04d}.png', rect_img_r)
                 else:
-                    self.rect_img_pub_l.publish(rect_img_l)
-                    self.rect_img_pub_r.publish(rect_img_r)
+                    self.rect_img_pub_l.publish(self.numpy_to_ros_image(rect_img_l))
+                    self.rect_img_pub_r.publish(self.numpy_to_ros_image(rect_img_r))
                 
                 # Ejercicio B
                 print(f"Obteniendo features {i+1}/{len}...")
@@ -469,8 +493,8 @@ class ImagePublisher(Node):
                     cv2.imwrite(f'{output_dir}/Keypoints/Left/keypoints_left_{i:04d}.png', img_key_pts_l)
                     cv2.imwrite(f'{output_dir}/Keypoints/Right/keypoints_right_{i:04d}.png', img_key_pts_r)
                 else:
-                    self.keypoints_img_pub_l.publish(img_key_pts_l)
-                    self.keypoints_img_pub_r.publish(img_key_pts_r)
+                    self.keypoints_img_pub_l.publish(self.numpy_to_ros_image(img_key_pts_l))
+                    self.keypoints_img_pub_r.publish(self.numpy_to_ros_image(img_key_pts_r))
 
                 # Ejercicio C
                 print(f"Obteniendo matches {i+1}/{len}...")
@@ -490,8 +514,8 @@ class ImagePublisher(Node):
                     cv2.imwrite(f'{output_dir}/Matches/all_matches_{i:04d}.png', img_all_matches)
                     cv2.imwrite(f'{output_dir}/Matches/good_matches_{i:04d}.png', img_good_matches)
                 else:
-                    self.all_matches_pub.publish(img_all_matches)
-                    self.good_matches_pub.publish(img_good_matches)
+                    self.all_matches_pub.publish(self.numpy_to_ros_image(img_all_matches))
+                    self.good_matches_pub.publish(self.numpy_to_ros_image(img_good_matches))
 
                 # Ejercicio D
                 print(f"Triangulando puntos {i+1}/{len}...")
@@ -515,7 +539,7 @@ class ImagePublisher(Node):
                 if save:
                     cv2.imwrite(f'{output_dir}/Matches/filtered_matches_{i:04d}.png', img_filtered_matches)
                 else:
-                    self.filtered_matches_pub.publish(img_filtered_matches)
+                    self.filtered_matches_pub.publish(self.numpy_to_ros_image(img_filtered_matches))
 
                 print(f"Transformando puntos {i+1}/{len}...")
 
@@ -533,7 +557,7 @@ class ImagePublisher(Node):
                 if save:
                     cv2.imwrite(f'{output_dir}/Transformed/transformed_points_r{i:04d}.png', img_transformed)
                 else:
-                    self.transformed_points_pub.publish(img_transformed)
+                    self.transformed_points_pub.publish(self.numpy_to_ros_image(img_transformed))
 
                 # Ejercicio F
                 print(f"Generando puntos 3D {i+1}/{len}...")
@@ -545,7 +569,8 @@ class ImagePublisher(Node):
                 if save:
                     np.save(f"{output_dir}/3DPoints/good_points3D_{i:04d}.npy", good_pts_3d_world)
                 else:
-                    self.good_points_3D_pub.publish(good_pts_3d_world)
+                    good_points_cloud = script.points_to_pointcloud2(good_pts_3d_world)
+                    self.good_points_3D_pub.publish(good_points_cloud)
 
                 # Triangulamos los puntos filtrados
                 filtered_pts_3D = script.triangulate(filtered_pts_l, filtered_pts_r)
@@ -557,7 +582,8 @@ class ImagePublisher(Node):
                 if save:
                     np.save(f"{output_dir}/Filtered3DPoints/filtered_points3D_{i:04d}.npy", filtered_pts_3D_world)
                 else:
-                    self.filtered_points_3D_pub.publish(filtered_pts_3D_world)
+                    filtered_points_cloud = script.points_to_pointcloud2(filtered_pts_3D_world)
+                    self.filtered_points_3D_pub.publish(filtered_points_cloud)
 
                 # Ejercicio G
                 print(f"Computando disparidad {i+1}/{len}...")
@@ -569,7 +595,7 @@ class ImagePublisher(Node):
                 if save:
                     cv2.imwrite(f'{output_dir}/Disparities/disparity_map_{i:04d}.png', disparity_map)
                 else:
-                    self.disparity_pub.publish(disparity_map)
+                    self.disparity_pub.publish(self.numpy_to_ros_image(disparity_map))
 
                 # Ejercicio H
                 print(f"Rebuildeando escena 3D {i+1}/{len}...")
@@ -584,7 +610,7 @@ class ImagePublisher(Node):
                 if save:
                     np.save(f'{output_dir}/RebiuldedScenes/rebuilded_pts_3D_world_{i:04d}.npy', rebuilded_pts_3D_world)
                 else:
-                    colored_rebuilded_pts_3D_world = color_3d_points(rebuilded_pts_3D_world, rect_img_l, script.Q)
+                    colored_rebuilded_pts_3D_world = script.color_3d_points(rebuilded_pts_3D, rect_img_l)
                     self.rebuilded_scene_pub.publish(colored_rebuilded_pts_3D_world)
 
                 # Ejercicio J
@@ -608,7 +634,7 @@ class ImagePublisher(Node):
                 if save:
                     cv2.imwrite(f'{output_dir}/CamerasPoses/cameras_pose_{i:04d}.png', img_poses)
                 else:
-                    self.poses_pub.publish(img_poses)
+                    self.poses_pub.publish(self.numpy_to_ros_image(img_poses))
 
                 # Subindice ii
                 print(f"Generando trayectoria {i+1}/{len}...")
@@ -634,6 +660,12 @@ class ImagePublisher(Node):
                     self.trayectory_msg.header.stamp = self.get_clock().now().to_msg()
                     
                     self.trayectory_pub.publish(self.trayectory_msg)
+
+    def numpy_to_ros_image(self, img_array):
+        if len(img_array.shape) == 3 and img_array.shape[2] == 3:
+            return self.bridge.cv2_to_imgmsg(img_array, encoding='bgr8')
+        elif len(img_array.shape) == 2 or (len(img_array.shape) == 3 and img_array.shape[2] == 1):
+            return self.bridge.cv2_to_imgmsg(img_array, encoding='mono8')
 
 def main():
 
