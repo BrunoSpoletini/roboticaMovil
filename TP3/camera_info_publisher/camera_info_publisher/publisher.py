@@ -28,7 +28,7 @@ def load_calib(path):
     return data
 
 class Script:
-    def __init__(self,cam_info_l, cam_info_r):
+    def __init__(self,cam_info_l, cam_info_r, R_cam_imu, t_cam_imu):
         self.cam_info_l = None
         self.cam_info_r = None
         self.dist_coef_l = None
@@ -44,6 +44,8 @@ class Script:
         # Cargamos las calibraciones
         self.cam_info_l = cam_info_l
         self.cam_info_r = cam_info_r
+        self.R_cam_imu = R_cam_imu
+        self.t_cam_imu = t_cam_imu
 
     def loadImagesFromBag(self, bag_path):
 
@@ -209,22 +211,25 @@ class Script:
         return pts_transformed_r
 
     def to_world(self, points, pose, scale=1.0):
-
-        # Aplanamos los puntos y filtramos NaNs
         pts = points.reshape(-1, 3)
-        mask = ~np.isnan(pts).any(axis=1)
-        pts = pts[mask]
+        pts = pts[~np.isnan(pts).any(axis=1)]
 
-        # Obtenemos traslación y rotación
-        t = np.array(pose[1:4])
-        r = Rotation.from_quat(pose[4:8]).as_matrix()  # scipy espera [x, y, z, w]
+        # Pose del IMU (en mundo)
+        t_imu = np.array(pose[1:4])
+        r_imu = Rotation.from_quat(pose[4:8]).as_matrix()
 
-        # Transformamos y aplicamos escala
-        points_world = scale * (r @ pts.T).T + t
+        # IMU -> Cámara
+        R_ic = self.R_cam_imu
+        t_ic = self.t_cam_imu
+
+        # Transformación total cámara → mundo
+        R_world_cam = r_imu @ R_ic
+        t_world_cam = r_imu @ t_ic.flatten() + t_imu
+
+        # Aplicamos la transformación
+        points_world = scale * (R_world_cam @ pts.T).T + t_world_cam
 
         return points_world.astype(np.float32)
-
-    # def to_points_cloud2(self, points, frame_id='map'):
 
 
 
@@ -284,11 +289,15 @@ class Script:
         points_reshaped = points_3d.reshape(-1, 3)
         colors_reshaped = rect_img.reshape(-1, 3)
         
-        # Filtramos puntos inválidos (infinitos o con Z <= 0)
-        valid_mask = np.isfinite(points_reshaped).all(axis=1) & (points_reshaped[:, 2] > 0)
+        # Filtramos puntos inválidos (infinitos o con Z <= 0, o dist > 20)
+        valid_mask = np.isfinite(points_reshaped).all(axis=1) & (points_reshaped[:, 2] > 0) & (np.linalg.norm(points_reshaped, axis=1) < 20)
         
         valid_points = points_reshaped[valid_mask]
         valid_colors = colors_reshaped[valid_mask]
+        
+        # Tomamos solo 1 de cada 5 puntos para reducir la densidad
+        valid_points = valid_points[::15]
+        valid_colors = valid_colors[::15]
         
         # Creamos el PointCloud2 con colores (BGR -> RGB)
         colored_point_cloud = self.points_to_pointcloud2(valid_points, valid_colors[:, ::-1], frame_id='map')
@@ -421,11 +430,13 @@ class ImagePublisher(Node):
         poses_path = os.path.join(input_dir, "poses.txt")
         calib_path_l = os.path.join(input_dir, "calibration_left.yaml")
         calib_path_r = os.path.join(input_dir, "calibration_right.yaml")
+        kalib_imu_cam = os.path.join(input_dir, "kalibr_imucam_chain.yaml")
 
         # Cargamos la informacion del input
         poses = np.loadtxt(poses_path)
         cam_info_l = load_calib(calib_path_l)
         cam_info_r = load_calib(calib_path_r)
+        R_cam_imu, t_cam_imu = self.load_extrinsics(kalib_imu_cam, "cam0")
 
         # Definimos el largo y los indices
         len = round(poses.size / 8)
@@ -434,7 +445,7 @@ class ImagePublisher(Node):
             indices = [random.randint(0, len - 1)]
 
         # Generamos
-        script = Script(cam_info_l, cam_info_r)
+        script = Script(cam_info_l, cam_info_r, R_cam_imu, t_cam_imu)
 
         # Cargamos la informacion de la camara
         script.loadCameraInfoVariables()
@@ -610,7 +621,7 @@ class ImagePublisher(Node):
                 if save:
                     np.save(f'{output_dir}/RebiuldedScenes/rebuilded_pts_3D_world_{i:04d}.npy', rebuilded_pts_3D_world)
                 else:
-                    colored_rebuilded_pts_3D_world = script.color_3d_points(rebuilded_pts_3D, rect_img_l)
+                    colored_rebuilded_pts_3D_world = script.color_3d_points(rebuilded_pts_3D_world, rect_img_l)
                     self.rebuilded_scene_pub.publish(colored_rebuilded_pts_3D_world)
 
                 # Ejercicio J
@@ -667,15 +678,30 @@ class ImagePublisher(Node):
         elif len(img_array.shape) == 2 or (len(img_array.shape) == 3 and img_array.shape[2] == 1):
             return self.bridge.cv2_to_imgmsg(img_array, encoding='mono8')
 
+    def load_extrinsics(self, yaml_path, cam_name="cam0"):
+        with open(yaml_path, "r") as f:
+            data = yaml.safe_load(f)
+
+        T_imu_cam = np.array(data[cam_name]["T_imu_cam"])
+        R_imu_cam = T_imu_cam[:3, :3]
+        t_imu_cam = T_imu_cam[:3, 3].reshape(3, 1)
+
+        # Invertimos para obtener T_cam_imu
+        R_cam_imu = R_imu_cam.T
+        t_cam_imu = -R_cam_imu @ t_imu_cam
+
+        return R_cam_imu, t_cam_imu
+
+
 def main():
 
-    if len(sys.argv) < 4:
-        print("Uso: python3 script.py <input_dir> <output_dir> [--save True]")
-        sys.exit(1)
+    # if len(sys.argv) < 4:
+    #     print("Uso: python3 script.py <input_dir> <output_dir> [--save True]")
+    #     sys.exit(1)
 
-    input_dir = sys.argv[1]
-    output_dir = sys.argv[2]
-    save = len(sys.argv) > 3 and sys.argv[3].lower() == "true"
+    input_dir = 'input/'
+    output_dir = 'output/'
+    save = False #len(sys.argv) > 3 and sys.argv[3].lower() == "true"
 
     if save:
         os.makedirs(os.path.join(output_dir, "Rectified/Left"), exist_ok=True)
