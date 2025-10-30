@@ -104,17 +104,19 @@ class Script:
         Rt_r = np.linalg.inv(K_r) @ P_r
 
         # Extraemos R y t de ambas camaras
-        R_l = Rt_l[:, :3]
-        R_r = Rt_r[:, :3]   
+        R_l_orig = Rt_l[:, :3]
+        R_r_orig = Rt_r[:, :3]   
         t_l = Rt_l[:, 3]
         t_r = Rt_r[:, 3]
 
-        # Obtenemos el R y t
-        R = R_r @ R_l.T
+        # Obtenemos el R y t relativos entre cámaras
+        R = R_r_orig @ R_l_orig.T
         t = t_r - R @ t_l
 
         # Calculamos las matrices de rectificación
-        R_l, R_r, P_l, P_r, Q, _, _ = cv2.stereoRectify(
+        # R_rect_l, R_rect_r son las rotaciones de rectificación
+        # P_rect_l, P_rect_r son las nuevas matrices de proyección rectificadas
+        R_rect_l, R_rect_r, P_rect_l, P_rect_r, Q, _, _ = cv2.stereoRectify(
             cameraMatrix1=K_l,
             distCoeffs1=dist_coef_l,
             cameraMatrix2=K_r,
@@ -125,15 +127,18 @@ class Script:
         )
 
         # Calculamos los mapas de remapeo para las cámaras izquierda y derecha
-        map1_l, map2_l = cv2.initUndistortRectifyMap(K_l, dist_coef_l, R_l, P_l, img_size, cv2.CV_32FC1)
-        map1_r, map2_r = cv2.initUndistortRectifyMap(K_r, dist_coef_r, R_r, P_r, img_size, cv2.CV_32FC1)
+        map1_l, map2_l = cv2.initUndistortRectifyMap(K_l, dist_coef_l, R_rect_l, P_rect_l, img_size, cv2.CV_32FC1)
+        map1_r, map2_r = cv2.initUndistortRectifyMap(K_r, dist_coef_r, R_rect_r, P_rect_r, img_size, cv2.CV_32FC1)
 
         # Aplicamos el remapeo a las imágenes
         rectified_left = cv2.remap(img_l, map1_l, map2_l, interpolation=cv2.INTER_LINEAR)
         rectified_right = cv2.remap(img_r, map1_r, map2_r, interpolation=cv2.INTER_LINEAR)
 
         # Guardamos las variables a utilizar en otros metodos
-        self.R, self.t, self.R_l, self.R_r, self.Q = R, t, R_l, R_r, Q
+        # Guardamos tanto las originales como las rectificadas
+        self.R, self.t, self.R_rect_l, self.R_rect_r = R, t, R_rect_l, R_rect_r
+        self.P_rect_l, self.P_rect_r = P_rect_l, P_rect_r
+        self.Q = Q
 
         return rectified_left, rectified_right
 
@@ -179,9 +184,17 @@ class Script:
 
     # Triangulamos los key points
     def triangulate(self, pts_l, pts_r):
-
+        """
+        Triangula puntos usando las matrices de proyección rectificadas.
+        Los puntos pts_l y pts_r deben estar en las imágenes rectificadas.
+        """
+        # Usamos las matrices de proyección rectificadas
+        # Si no están disponibles (antes de rectificar), usamos las originales
+        P_l = self.P_rect_l if hasattr(self, 'P_rect_l') else self.P_l
+        P_r = self.P_rect_r if hasattr(self, 'P_rect_r') else self.P_r
+        
         # Realizamos la triangulacion
-        pts_4D = cv2.triangulatePoints(self.P_l, self.P_r, pts_l.T, pts_r.T)
+        pts_4D = cv2.triangulatePoints(P_l, P_r, pts_l.T, pts_r.T)
         pts_3D = (pts_4D[:3] / pts_4D[3]).T
 
         return pts_3D
@@ -211,30 +224,60 @@ class Script:
         return pts_transformed_r
 
     def to_world(self, points, pose, scale=1.0):
+        """
+        Transforma puntos desde el sistema de coordenadas de la cámara rectificada
+        al sistema de coordenadas del mundo.
+        
+        Cadena de transformación:
+        1. Puntos en sistema de cámara rectificada (cam_rect)
+        2. A sistema de cámara original (cam0) - usando R_rect_l^T
+        3. A sistema IMU - usando T_imu_cam (R_cam_imu, t_cam_imu)
+        4. A sistema mundo - usando pose del IMU
+        """
         pts = points.reshape(-1, 3)
         pts = pts[~np.isnan(pts).any(axis=1)]
+        
+        if pts.shape[0] == 0:
+            return np.array([]).reshape(0, 3).astype(np.float32)
 
-        # Pose del IMU (en mundo)
-        t_imu = np.array(pose[1:4])
-        r_imu = Rotation.from_quat(pose[4:8]).as_matrix()
+        # Paso 1: De cámara rectificada a cámara original
+        # Los puntos de reprojectImageTo3D están en el sistema rectificado
+        # Necesitamos aplicar la rotación inversa de rectificación
+        pts_cam0 = (self.R_rect_l.T @ pts.T).T
 
-        # IMU -> Cámara
-        R_ic = self.R_cam_imu
-        t_ic = self.t_cam_imu
+        # Paso 2: Pose del IMU en el mundo
+        t_imu_world = np.array(pose[1:4])
+        q_imu_world = pose[4:8]  # [qx, qy, qz, qw]
+        R_imu_world = Rotation.from_quat(q_imu_world).as_matrix()
 
-        # Transformación total cámara → mundo
-        R_world_cam = r_imu @ R_ic
-        t_world_cam = r_imu @ t_ic.flatten() + t_imu
+        # Paso 3: Transformación de cam0 a IMU (tenemos T_imu_cam que transforma de cam a IMU)
+        R_imu_cam = self.R_cam_imu  # Rotación de cam a IMU
+        t_imu_cam = self.t_cam_imu.flatten()  # Traslación de cam a IMU
 
-        # Aplicamos la transformación
-        points_world = scale * (R_world_cam @ pts.T).T + t_world_cam
+        # Paso 4: Transformación completa: cam0 -> IMU -> mundo
+        # Primero: cam0 -> IMU
+        pts_imu = (R_imu_cam @ pts_cam0.T).T + t_imu_cam
+        
+        # Segundo: IMU -> mundo
+        pts_world = (R_imu_world @ pts_imu.T).T + t_imu_world
 
-        return points_world.astype(np.float32)
+        return pts_world.astype(np.float32)
 
 
 
     # Computamos el mapa de disparidad
     def computeDisparityMap(self, left_image, right_image):
+        # Convertimos a escala de grises si es necesario
+        if len(left_image.shape) == 3:
+            left_gray = cv2.cvtColor(left_image, cv2.COLOR_BGR2GRAY)
+        else:
+            left_gray = left_image
+            
+        if len(right_image.shape) == 3:
+            right_gray = cv2.cvtColor(right_image, cv2.COLOR_BGR2GRAY)
+        else:
+            right_gray = right_image
+        
         # Parámetros para StereoSGBM (pueden requerir ajuste fino para tu dataset)
         min_disp = 0
         
@@ -261,9 +304,10 @@ class Script:
             speckleRange=32
         )
 
-        # Calculamos el mapa de disparidad. El resultado está codificado y necesita ser dividido por 16.0
+        # Calculamos el mapa de disparidad usando las imágenes en escala de grises
+        # El resultado está codificado y necesita ser dividido por 16.0
         # y convertido a float32 para la reproyección 3D.
-        disparity_map = stereo.compute(left_image, right_image).astype(np.float32) / 16.0
+        disparity_map = stereo.compute(left_gray, right_gray).astype(np.float32) / 16.0
         
         # Guardamos el mapa de disparidad real (flotante) para la reproyección 3D (Ejercicio H)
         self.disparity = disparity_map 
@@ -280,7 +324,7 @@ class Script:
         return points3D
 
 
-    def color_3d_points(self, points_3d, rect_img):
+    def color_3d_points(self, points_3d, rect_img, pose=None):
         # Los puntos 3D tienen la misma estructura que la imagen (height x width x 3)
         # Podemos usar directamente los índices para obtener los colores
         h, w, _ = rect_img.shape
@@ -298,6 +342,10 @@ class Script:
         # Tomamos solo 1 de cada 5 puntos para reducir la densidad
         valid_points = valid_points[::15]
         valid_colors = valid_colors[::15]
+        
+        # Si se proporciona una pose, transformamos al mundo
+        if pose is not None:
+            valid_points = self.to_world(valid_points, pose)
         
         # Creamos el PointCloud2 con colores (BGR -> RGB)
         colored_point_cloud = self.points_to_pointcloud2(valid_points, valid_colors[:, ::-1], frame_id='map')
@@ -359,22 +407,36 @@ class Script:
 
     # Estimamos la pose de las camaras
     def stimatePose(self, pts_l, pts_r):
+        """
+        Estima la pose relativa entre las dos cámaras usando puntos correspondientes.
+        Después de la rectificación, usa las matrices de proyección rectificadas.
+        """
+        # Usamos la matriz de cámara rectificada (es K' de P_rect_l)
+        # P_rect_l = [K' | 0], entonces K' = P_rect_l[:, :3]
+        K_rect = self.P_rect_l[:3, :3] if hasattr(self, 'P_rect_l') else self.K_l
 
         # Obtenemos la matriz esencial
-        E, mask = cv2.findEssentialMat(pts_l, pts_r, self.M)
+        E, mask = cv2.findEssentialMat(pts_l, pts_r, K_rect, method=cv2.RANSAC, prob=0.999, threshold=1.0)
 
         # Obtenemos la transformacion entre la camara izquierda y derecha
-        _, R_est, t, mask = cv2.recoverPose(E, pts_l, pts_r, self.K_l)
+        _, R_est, t_est, mask = cv2.recoverPose(E, pts_l, pts_r, K_rect)
 
-        # Obtenemos el base line
-        f_x = self.P_l[0,0]
-        t_x_r = self.P_r[0,3]   
-        baseline = -t_x_r / f_x
+        # Obtenemos el baseline de las matrices de proyección rectificadas
+        # P_rect_r tiene la forma [K' | K'*[baseline, 0, 0]^T]
+        # El baseline está en P_rect_r[0,3] / f_x
+        if hasattr(self, 'P_rect_r'):
+            f_x = self.P_rect_l[0, 0]
+            t_x_r = self.P_rect_r[0, 3]
+            baseline = -t_x_r / f_x
+        else:
+            f_x = self.P_l[0, 0]
+            t_x_r = self.P_r[0, 3]
+            baseline = -t_x_r / f_x
 
         # Obtenemos la traslacion escalada
-        t_scaled = t * baseline
+        t_scaled = t_est * baseline
 
-        # Suponemos la posicion de la camara izquierda se encuetra en el centro de la imagen izquierda
+        # Suponemos la posicion de la camara izquierda se encuentra en el centro de la imagen izquierda
         camera_pose_l = np.array([0.0, 0.0, 0.0])
         camera_pose_r = t_scaled.reshape(3) 
 
@@ -382,7 +444,7 @@ class Script:
         img_width = self.img_size[0]
         scale = 1.0 / f_x * img_width  # factor relativo
 
-        # Pasamos los pose a coordenadas de la camara
+        # Pasamos los pose a coordenadas de la camara (proyección 2D para visualización)
         img_size = self.img_size
         camera_pose_l = (int(img_size[0]/2 + camera_pose_l[0]*scale), int(img_size[1] - camera_pose_l[2]*scale))
         camera_pose_r = (int(img_size[0]/2 + camera_pose_r[0]*scale), int(img_size[1] - camera_pose_r[2]*scale))
@@ -460,6 +522,7 @@ class ImagePublisher(Node):
         for i in indices:
             if save or i % 10 == 0:
 
+                # input("Presiona Enter para continuar...")
                 print(f"Procesando frame {i+1}/{len}...")
 
                 print(f"Procesando imagenes {i+1}/{len}...")
@@ -615,14 +678,17 @@ class ImagePublisher(Node):
                 rebuilded_pts_3D = script.rebuildDense3DScene()
 
                 # Ejercicio I
+                # Coloreamos los puntos y transformamos al mundo en una sola operación
+                colored_rebuilded_pts_3D = script.color_3d_points(rebuilded_pts_3D, rect_img_l, poses[i])
+                
+                # También transformamos para guardar si es necesario
                 rebuilded_pts_3D_world = script.to_world(rebuilded_pts_3D, poses[i])
 
                 # Guardamos o publicamos la escena rebuildeada
                 if save:
                     np.save(f'{output_dir}/RebiuldedScenes/rebuilded_pts_3D_world_{i:04d}.npy', rebuilded_pts_3D_world)
                 else:
-                    colored_rebuilded_pts_3D_world = script.color_3d_points(rebuilded_pts_3D_world, rect_img_l)
-                    self.rebuilded_scene_pub.publish(colored_rebuilded_pts_3D_world)
+                    self.rebuilded_scene_pub.publish(colored_rebuilded_pts_3D)
 
                 # Ejercicio J
 
@@ -682,12 +748,17 @@ class ImagePublisher(Node):
         with open(yaml_path, "r") as f:
             data = yaml.safe_load(f)
 
+        # T_imu_cam: transformación de cámara a IMU (según Kalibr)
         T_imu_cam = np.array(data[cam_name]["T_imu_cam"])
-        R_imu_cam = T_imu_cam[:3, :3]
-        t_imu_cam = T_imu_cam[:3, 3].reshape(3, 1)
+        R_imu_cam = T_imu_cam[:3, :3]  # Rotación de cam a IMU
+        t_imu_cam = T_imu_cam[:3, 3].reshape(3, 1)  # Traslación de cam a IMU
 
-        # Invertimos para obtener T_cam_imu
-        R_cam_imu = R_imu_cam.T
+        # T_imu_cam ya es la transformación de cámara a IMU
+        # Guardamos directamente
+        R_cam_imu = R_imu_cam
+        t_cam_imu = t_imu_cam
+
+        return R_cam_imu, t_cam_imu
         t_cam_imu = -R_cam_imu @ t_imu_cam
 
         return R_cam_imu, t_cam_imu
@@ -701,7 +772,7 @@ def main():
 
     input_dir = 'input/'
     output_dir = 'output/'
-    save = False #len(sys.argv) > 3 and sys.argv[3].lower() == "true"
+    save = True #len(sys.argv) > 3 and sys.argv[3].lower() == "true"
 
     if save:
         os.makedirs(os.path.join(output_dir, "Rectified/Left"), exist_ok=True)
