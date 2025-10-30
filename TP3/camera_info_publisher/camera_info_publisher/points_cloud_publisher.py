@@ -1,83 +1,62 @@
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import PointCloud2, PointField
+from sensor_msgs.msg import CameraInfo, Image, PointCloud, PointField, PointCloud2
 from std_msgs.msg import Header
+import yaml
 import numpy as np
-import os
 
-class PointCloudPublisher(Node):
-    def __init__(self, input_dir, scale=1.0):
+class PointsCloudPublisher(Node):
+    def __init__(self):
         super().__init__('point_cloud_publisher')
 
-        self.input_dir = input_dir
-        self.scale = scale
+        # leemos de un archivo .npy los puntos 3D
+        self.points = np.load('/home/sco/roboticaMovil/TP3/output.npy', allow_pickle=True)
+
+        self.pcd_publisher = self.create_publisher(PointCloud2, 'point_cloud_ejd', 10)
+        timer_period = 1/30.0
+        self.timer = self.create_timer(timer_period, self.timer_callback)
+
+    def timer_callback(self):
+        self.pcd = array_to_point_cloud(self.points, 'map')
+        self.pcd_publisher.publish(self.pcd)
+
+def array_to_point_cloud(points, parent_frame):
+    # Asegurarse que los puntos sean float32
+    points = points.astype(np.float32)
+
+    # Verificar que points tenga forma (H, W, 3)
+    if len(points.shape) != 3 or points.shape[2] != 3:
+        raise ValueError(f"Formato inválido de puntos: {points.shape}. Se esperaba (H, W, 3).")
+
+    h, w, _ = points.shape
+
+    header = Header()
+    header.stamp = rclpy.time.Time().to_msg()
+    header.frame_id = parent_frame
+
+    fields = [
+        PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
+        PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
+        PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
+    ]
+
+    point_cloud_msg = PointCloud2()
+    point_cloud_msg.header = header
+    point_cloud_msg.height = h
+    point_cloud_msg.width = w
+    point_cloud_msg.fields = fields
+    point_cloud_msg.is_bigendian = False
+    point_cloud_msg.point_step = 12  # 3 * float32
+    point_cloud_msg.row_step = point_cloud_msg.point_step * w
+    point_cloud_msg.is_dense = True
+    point_cloud_msg.data = points.tobytes()
+
+    return point_cloud_msg
 
 
-        self.sub_points_cloud = 
-            self.create_subscription(PointCloud2,'/Publisher/filtered_points',self.instancia_nube_puntos_callback,10)
-
-        self.pub = self.create_publisher(PointCloud2, 'colored_point_cloud', 10)
-
-
-    def instancia_nube_puntos_callback(self, msg):
-
-
-        self.get_logger().info(f'Publishing {file_path}')
-        points = msg
-
-        # Transformar a mundo y filtrar NaNs
-        if points.ndim == 3:
-            pts = points.reshape(-1, 3)
-        else:
-            pts = points
-        mask = ~np.isnan(pts).any(axis=1)
-        pts = pts[mask]
-
-        # Aplicar escala si se pasó
-        pts = self.scale * pts
-
-        msg = self.points_to_pointcloud2(pts, frame_id='map')
-        self.pub.publish(msg)
-
-        self.index = (self.index + 1) % len(self.files)
-
-
-    @staticmethod
-    def points_to_pointcloud2(points, frame_id='map'):
-        header = Header()
-        header.stamp = rclpy.time.Time().to_msg()
-        header.frame_id = frame_id
-
-        fields = [
-            PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
-            PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
-            PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1)
-        ]
-
-        msg = PointCloud2()
-        msg.header = header
-        msg.height = 1
-        msg.width = points.shape[0]
-        msg.fields = fields
-        msg.is_bigendian = False
-        msg.point_step = 12
-        msg.row_step = msg.point_step * points.shape[0]
-        msg.is_dense = True
-        msg.data = points.astype(np.float32).tobytes()
-
-        return msg
-
-def main():
-    import sys
-    if len(sys.argv) < 2:
-        print("Uso: ros2 run <package> pointcloud_publisher.py <directorio_npy>")
-        return
-
-    input_dir = sys.argv[1]
-    scale = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
-
-    rclpy.init()
-    node = PointCloudPublisher(input_dir, scale)
+def main(args=None):
+    rclpy.init(args=args)
+    node = PointsCloudPublisher()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
@@ -85,6 +64,7 @@ def main():
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()
