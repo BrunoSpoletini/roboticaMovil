@@ -31,7 +31,7 @@ cd TP3
 ```
 Iniciar la camara en loop desde el bag de ros2
 ```
-ros2 bag play cam_checkerboard.db3
+ros2 bag play cam_checkerboard.db3/cam_checkerboard.db3
 ```
 Donde cam_checkerboard.db3 es la rosbag de calibracion
 \
