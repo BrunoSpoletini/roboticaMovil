@@ -71,8 +71,7 @@ Para publicar es necesario correr el siguiente comando
 ```
 ros2 run camera_info_publisher publisher <input>
 ```
-Donde
-* <input> : carpeta con los archivos de entrada
+Donde input es la carpeta con los archivos de entrada
 La carpeta <input> debe estructurarse de la sigueinte forma
 ```
 .
