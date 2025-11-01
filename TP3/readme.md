@@ -27,8 +27,11 @@ source install/setup.bash
 # Ejercicio 1
 Iniciar la camara en loop desde el bag de ros2
 ```
-ros2 bag play archivos/rosbags/ros2/cam_checkerboard/cam_checkerboard.db3
+ros2 bag play <calibration_rosbag>
 ```
+Donde <calibration_rosbag> es el path a la rosbag de calibracion
+\
+\
 Iniciar la calibracion 
 ```
 ros2 run camera_calibration cameracalibrator --size 7x6 --square 0.06 --no-service-check --ros-args --remap left:=/cam0/image_raw --ros-args --remap right:=/cam1/image_raw -p camera:=/my_camera
@@ -42,6 +45,14 @@ ros2 run rviz2 rviz2
 ```
 # Ejercicio 2
 ## Instalacion Librerias pip
+Para instalar librerias por pip es necesario entrar a una virtual machien
+```
+source ~/venv_sfm/bin/activate
+```
+Luego instalamos las librerias con pip
+```
+pip install pyelas numpy<2
+```
 ## Compilacion del Publicador
 Primero es necesario compilar el publicador
 ```
