@@ -18,7 +18,6 @@ from visualization_msgs.msg import Marker
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
 
-# Variable Globales del programa
 input_dir = None
 output_dir = None
 
@@ -78,7 +77,7 @@ def loadCameraInfoVariables():
     K_r = np.array(cam_info_r['camera_matrix']['data']).reshape(3, 3)
     P_r = np.array(cam_info_r['projection_matrix']['data']).reshape(3, 4)
 
-# Pasamos de imagenes numpy a imagenes ros
+# 
 def numpy_to_ros_image(img_array):
     if len(img_array.shape) == 3 and img_array.shape[2] == 3:
         return bridge.cv2_to_imgmsg(img_array, encoding='bgr8')
@@ -114,8 +113,7 @@ def to_world(points, pose):
 
         return pts_world.astype(np.float32)
 
-# Carga la configuracion de la camara
-def loadIMUConfiguration(yaml_path):
+def load_extrinsics(yaml_path):
 
     global T_imu_cam_l, T_imu_cam_r, T_cam_imu_l, T_cam_imu_r
 
@@ -130,7 +128,6 @@ def loadIMUConfiguration(yaml_path):
     T_cam_imu_l = np.linalg.inv(T_imu_cam_l)
     T_cam_imu_r = np.linalg.inv(T_imu_cam_r)
 
-# Pasa los puntos a puntos nube
 def points_to_pointcloud2(points, colors=None, frame_id='map'):
         header = Header()
         header.stamp = rclpy.time.Time().to_msg()
@@ -156,7 +153,7 @@ def points_to_pointcloud2(points, colors=None, frame_id='map'):
         msg.is_bigendian = False
         msg.point_step = point_step
         msg.row_step = msg.point_step * points.shape[0]
-        msg.is_dense = False 
+        msg.is_dense = False  # Set to False because we may have filtered some points
 
         if colors is not None:
             r = colors[:, 0].astype(np.uint32)
@@ -206,18 +203,16 @@ class ImagePublisher(Node):
 
         self.timer = self.create_timer(0.1, self.publish_next_img)
 
-    # Publica la siguiente imagen
     def publish_next_img(self):
 
         global index
 
-        # Loop
         if index < poses_len:    
             index = index + 1
         else:
             index = 0
 
-        print(f"Procesando imagen {index+1}/{poses_len}...")
+        print(f"Procesando imagen {index+1}/{len}...")
 
         # Cargamos las imagenes
         img_l = self.imgs_l[index]
@@ -227,7 +222,7 @@ class ImagePublisher(Node):
         self.img_pub_l.publish(numpy_to_ros_image(img_l))
         self.img_pub_r.publish(numpy_to_ros_image(img_r))
 
-    # Carga las imagenes de la rosbag
+
     def loadImagesFromBag(self, bag_path):
 
         topic_left="/cam0/image_raw"
@@ -254,7 +249,6 @@ class ImagePublisher(Node):
         
         return left_images, right_images
     
-# Rectificador de Imagenes
 class ImageRectifier(Node):
     def __init__(self):
         super().__init__('image_rectifier')
@@ -304,7 +298,6 @@ class ImageRectifier(Node):
 
         self.sync.registerCallback(self.callback_rectify_image)
 
-    # Callback para rectificar las imagenes
     def callback_rectify_image(self, img_l, img_r):
 
         img_cv_l = bridge.imgmsg_to_cv2(img_l, desired_encoding='bgr8')
@@ -318,10 +311,12 @@ class ImageRectifier(Node):
         self.rect_img_pub_l.publish(numpy_to_ros_image(rect_img_l))
         self.rect_img_pub_r.publish(numpy_to_ros_image(rect_img_r))
 
-# Buscador de Matches
+
 class MatchesFinder(Node):
     def __init__(self):
         super().__init__('matches_finder')
+
+        print(f"Obteniendo features {index+1}/{len}...")
 
         # Keypoints
         self.keypoints_img_pub_l = self.create_publisher(Image, '/Publisher/Left/keypoints_img', 10)
@@ -349,10 +344,9 @@ class MatchesFinder(Node):
 
         self.sync.registerCallback(self.callback_find_matches)
 
-    # Callback para buscar los matches
     def callback_find_matches(self, img_l, img_r):
 
-        print(f"Obteniendo features {index+1}/{poses_len}...")
+        print(f"Obteniendo features {index+1}/{len}...")
 
         img_cv_l = bridge.imgmsg_to_cv2(img_l, desired_encoding='bgr8')
         img_cv_r = bridge.imgmsg_to_cv2(img_r, desired_encoding='bgr8')
@@ -368,7 +362,7 @@ class MatchesFinder(Node):
         self.keypoints_img_pub_l.publish(numpy_to_ros_image(img_key_pts_l))
         self.keypoints_img_pub_r.publish(numpy_to_ros_image(img_key_pts_r))
 
-        print(f"Obteniendo matches {index+1}/{poses_len}...")
+        print(f"Obteniendo matches {index+1}/{len}...")
 
         # Obtenemos todos los matches
         all_matches = self.getMatches()
@@ -384,7 +378,7 @@ class MatchesFinder(Node):
         self.all_matches_pub.publish(numpy_to_ros_image(img_all_matches))
         self.good_matches_pub.publish(numpy_to_ros_image(img_good_matches))
 
-        print(f"Triangulando puntos {index+1}/{poses_len}...")
+        print(f"Triangulando puntos {index+1}/{len}...")
 
         # Obtenems los puntos de los matches buenos
         good_pts_l, good_pts_r = self.getMatchesPoints(good_matches)
@@ -392,7 +386,7 @@ class MatchesFinder(Node):
         # Triangulamos los puntos
         good_pts_3D = self.triangulate(good_pts_l, good_pts_r)
 
-        print(f"Filtrando matches {index+1}/{poses_len}...")
+        print(f"Filtrando matches {index+1}/{len}...")
 
         # Filtramos los matches espureos
         filtered_matches = self.filterMatches(good_matches, good_pts_l, good_pts_r)
@@ -403,7 +397,7 @@ class MatchesFinder(Node):
         # Publicamos los matches filtrados
         self.filtered_matches_pub.publish(numpy_to_ros_image(img_filtered_matches))
 
-        print(f"Transformando puntos {index+1}/{poses_len}...")
+        print(f"Transformando puntos {index+1}/{len}...")
 
         # Transformamos los puntos a la imagen derecha utilizando la matriz M
         filtered_pts_l, filtered_pts_r = self.getMatchesPoints(filtered_matches)
@@ -418,7 +412,7 @@ class MatchesFinder(Node):
         # Publicamos la imagen con los puntos transformados
         self.transformed_points_pub.publish(numpy_to_ros_image(img_transformed))
 
-        print(f"Generando puntos 3D {index+1}/{poses_len}...")
+        print(f"Generando puntos 3D {index+1}/{len}...")
 
         # Pasamos los puntos buenos al sistema de coordenadas global
         good_pts_3d_world = to_world(good_pts_3D, poses[index])
@@ -502,7 +496,6 @@ class MatchesFinder(Node):
 
         return filtered_matches
     
-    # Transforma los puntos de la imagen izquierda a la imagen derecha
     def transformPoints(self, pts_l):
 
         pts_l = np.asarray(pts_l, dtype=np.float32)
@@ -513,7 +506,6 @@ class MatchesFinder(Node):
 
         return pts_transformed_r
 
-# Reconstructor de la Escena
 class SceneRebuilder(Node):
     def __init__(self):
         super().__init__('scene_rebuilder')
@@ -532,13 +524,12 @@ class SceneRebuilder(Node):
 
         self.sync.registerCallback(self.callback_rebuild_scene)
 
-    # Callback para reconstruir la escena
     def callback_rebuild_scene(self, img_l, img_r):
 
         img_cv_l = bridge.imgmsg_to_cv2(img_l, desired_encoding='bgr8')
         img_cv_r = bridge.imgmsg_to_cv2(img_r, desired_encoding='bgr8')
 
-        print(f"Computando disparidad {index+1}/{poses_len}...")
+        print(f"Computando disparidad {index+1}/{len}...")
 
         # Obtenemos el mapa de disparidad
         disparity_map = self.computeDisparityMap(img_cv_l, img_cv_r)
@@ -546,7 +537,7 @@ class SceneRebuilder(Node):
         # Publicamos el mapa de disparidad
         self.disparity_map_pub.publish(numpy_to_ros_image(disparity_map))
 
-        print(f"Rebuildeando escena 3D {index+1}/{poses_len}...")
+        print(f"Rebuildeando escena 3D {index+1}/{len}...")
 
         # Rebuildeamos la escena 3D
         rebuilded_pts_3D = cv2.reprojectImageTo3D(disparity_map, Q).astype(np.float32)
@@ -635,7 +626,6 @@ class SceneRebuilder(Node):
         
         return colored_point_cloud
 
-# Publicador de Trayectoria
 class TrayectoryPublisher(Node):
     def __init__(self):
         super().__init__('trayectory_publisher')
@@ -657,10 +647,9 @@ class TrayectoryPublisher(Node):
 
         self.sync.registerCallback(self.callback_publish_trayectory)
 
-    # Callback para publicar la trayectoria
     def callback_publish_trayectory(self, img_l, img_r):
 
-        print(f"Generando trayectoria {index+1}/{poses_len}...")
+        print(f"Generando trayectoria {index+1}/{len}...")
 
         t = poses[index][1:4]
         q = poses[index][4:]
@@ -742,12 +731,10 @@ class TrayectoryPublisher(Node):
         # Publicamos la trayectoria de la camara izquierda
         self.trayectory_pub.publish(self.trayectory_msg)
 
-# Funcion Principal
 def main():
 
     global input_dir, output_dir, poses, cam_info_l, cam_info_r, bridge
 
-    # Parseamos los argumentos
     if len(sys.argv) < 3:
         print("Uso: python3 script.py <input_dir> <output_dir> [--save True]")
         sys.exit(1)
@@ -765,21 +752,19 @@ def main():
     poses = np.loadtxt(poses_path)
     cam_info_l = load_calib(calib_path_l)
     cam_info_r = load_calib(calib_path_r)
-    loadIMUConfiguration(kalib_imu_cam)
+    load_extrinsics(kalib_imu_cam)
     loadCameraInfoVariables()
 
     bridge = CvBridge()
     
     rclpy.init()
 
-    # Inicializamos los nodos
     trayectoryPublisherNode = TrayectoryPublisher()
     sceneRebuilderNode = SceneRebuilder()
     matchesFinderNode = MatchesFinder()
     imageRectifierNode = ImageRectifier()
     imagePublisherNode = ImagePublisher()
 
-    # Realizamos una ejecucion multi-thread de los nodos
     executor = MultiThreadedExecutor()
     executor.add_node(trayectoryPublisherNode)
     executor.add_node(sceneRebuilderNode)
