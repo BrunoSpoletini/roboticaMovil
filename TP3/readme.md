@@ -1,13 +1,10 @@
 # Instalacion
-
+```
 sudo apt update
-
 sudo apt install ros-jazzy-camera-calibration-parsers
-
 sudo apt install ros-jazzy-camera-info-manager
-
 sudo apt install ros-jazzy-launch-testing-ament-cmake
-
+```
 ### Depende del tipo de config de git que tengas:
 git clone -b jazzy git@github.com:ros-perception/image_pipeline.git
 ### ó
