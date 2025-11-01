@@ -51,7 +51,7 @@ source ~/venv_sfm/bin/activate
 ```
 Luego instalamos las librerias con pip
 ```
-pip install pyelas numpy<2
+pip install -r requirements.txt
 ```
 ## Compilacion del Publicador
 Primero es necesario compilar el publicador
