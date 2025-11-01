@@ -25,6 +25,10 @@ colcon build --symlink-install
 source install/setup.bash
 ```
 # Ejercicio 1
+Primero es recomendado entrar al directorio del Trabajo Praactico, ya que ahi se encutran los archivos necesario
+```
+cd TP3
+```
 Iniciar la camara en loop desde el bag de ros2
 ```
 ros2 bag play <calibration_rosbag>
