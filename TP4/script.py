@@ -3,6 +3,8 @@
 import numpy as np
 import gtsam
 from gtsam import Pose2
+import argparse
+import matplotlib.pyplot as plt
 
 # Ejercicio 1
 def parse_g20_file(filepath):
@@ -130,10 +132,9 @@ def pertubateValues(old_poses, sigma, seed):
 def OptimizeGaussNewton(graph, initial_poses):
 
     # Definimos los parametros del Gauss Newton
-    if params is None:
-        params = gtsam.GaussNewtonParams()
-        params.setMaxIterations(100)
-        params.setRelativeErrorTol(1e-6)
+    params = gtsam.GaussNewtonParams()
+    params.setMaxIterations(100)
+    params.setRelativeErrorTol(1e-6)
 
     # Creamos el optimizador con el grado, los valores iniciales y los parametros
     optimizer = gtsam.GaussNewtonOptimizer(graph, initial_poses, params)
@@ -141,4 +142,59 @@ def OptimizeGaussNewton(graph, initial_poses):
     # Obtenemos el resultado de la optimizacion
     result = optimizer.optimize()
 
-    return result, optimizer
+    return result
+
+# Extrae los puntos de la trayectoria de poses
+def extract_trayectory(poses):
+
+    indexes = list(poses.keys())
+
+    # Filtramos solo keys que son enteros
+    filtered_indexes = [k for k in indexes if isinstance(k, int) or (hasattr(k, 'toInt') and isinstance(k, int))]
+    
+    # Ordenamos los indices
+    sorted_indexes = sorted(filtered_indexes)
+
+    # Extramos los (x, y) de las poses
+    xs, ys = [], []
+
+    for index in sorted_indexes:
+
+        p = poses.atPose2(index)
+        xs.append(p.x()); ys.append(p.y())
+
+    return np.array(xs), np.array(ys), sorted_indexes
+
+# Ploteamos las poses inciales y optimizados
+def plot_poses(initial_poses, optimized_poses, outputdir):
+
+    # Extramos los puntos de la trayectoria de los poses iniciales y optimizados
+    ixs, iys, ikeys = extract_trayectory(initial_poses)
+    oxs, oys, okeys = extract_trayectory(optimized_poses)
+
+    plt.figure(figsize=(8,6))
+    plt.plot(ixs, iys, 'o-', label='Poses Iniciales')
+    plt.plot(oxs, oys, 'o-', label='Poses Optimizados')
+    plt.axis('equal')
+    plt.xlabel('x (m)')
+    plt.ylabel('y (m)')
+    plt.title('Poses: inicial vs optimizada (Gauss-Newton)')
+    plt.legend()
+    plt.savefig(f'{outputdir}/poses,png', dpi=300)
+    plt.show()
+
+def main(g20_pathfile, outputdir):
+
+    poses, edges = parse_g20_file(g20_pathfile)
+    graph, initial_poses = generate_graph(poses, edges) 
+    perturbed_initial_poses = pertubateValues(initial_poses, (0.02, 0.02, 0.01), 0)
+    optimized_poses = OptimizeGaussNewton(graph, perturbed_initial_poses)
+    plot_poses(perturbed_initial_poses, optimized_poses, outputdir)
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Batch SLAM Intel 2D con GTSAM (Gauss-Newton)")
+    parser.add_argument('--g2o', type=str, default='input_INTEL_g2o.g2o', help='ruta al .g2o')
+    parser.add_argument('--output', type=str, default='output', help='Directorio de salida')
+    args = parser.parse_args()
+
+    main(args.g2o, args.output)
