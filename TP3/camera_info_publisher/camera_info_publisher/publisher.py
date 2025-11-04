@@ -337,8 +337,6 @@ class MatchesFinder(Node):
         self.filtered_matches_pub = self.create_publisher(Image, '/Publisher/filtered_matches', 10)
         # Transformed Points
         self.transformed_points_pub = self.create_publisher(Image, '/Publisher/transformed_points', 10)
-        # Mapa de disparidad
-        self.disparity_pub = self.create_publisher(Image, '/Publisher/disparity_map', 10)
         # Nube de puntos
         self.good_points_3D_pub = self.create_publisher(PointCloud2, '/Publisher/good_points', 10)
         self.filtered_points_3D_pub = self.create_publisher(PointCloud2, '/Publisher/filtered_points', 10)
