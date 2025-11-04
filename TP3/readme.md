@@ -1,4 +1,8 @@
 # Instalacion Inicial
+
+## Clonar repositorio
+git clone https://github.com/BrunoSpoletini/roboticaMovil.git
+
 ## Instalacion del distro jazzy
 Para instalar el distro es necesario correr los siguientes comandos
 ```
