@@ -49,17 +49,16 @@ M = None
 
 T_imu_cam_l = None
 T_imu_cam_r = None
-
 T_cam_imu_l = None
 T_cam_imu_r = None
 
-# Cargamos la calibracion de las camaras
+# Carga la calibracion de las camaras
 def load_calib(path):
     with open(path, 'r') as f:
         data = yaml.safe_load(f)
     return data
 
-# Cargamos la informacion de calibracion de las camaras en variables locales
+# Carga la informacion de calibracion de las camaras en variables locales
 def loadCameraInfoVariables():
 
     global img_size, dist_coef_l, dist_coef_r, K_l, P_l, K_r, P_r
@@ -78,7 +77,7 @@ def loadCameraInfoVariables():
     K_r = np.array(cam_info_r['camera_matrix']['data']).reshape(3, 3)
     P_r = np.array(cam_info_r['projection_matrix']['data']).reshape(3, 4)
 
-# Pasamos de imagenes numpy a imagenes ros
+# Pasa de imagenes numpy a imagenes ros
 def numpy_to_ros_image(img_array):
     if len(img_array.shape) == 3 and img_array.shape[2] == 3:
         return bridge.cv2_to_imgmsg(img_array, encoding='bgr8')
@@ -119,6 +118,7 @@ def loadIMUConfiguration(yaml_path):
 
     global T_imu_cam_l, T_imu_cam_r, T_cam_imu_l, T_cam_imu_r
 
+    # Abrimos el archivo de configuracion
     with open(yaml_path, "r") as f:
         data = yaml.safe_load(f)
 
@@ -158,6 +158,7 @@ def points_to_pointcloud2(points, colors=None, frame_id='map'):
         msg.row_step = msg.point_step * points.shape[0]
         msg.is_dense = False 
 
+        # Coloreamos
         if colors is not None:
             r = colors[:, 0].astype(np.uint32)
             g = colors[:, 1].astype(np.uint32)
@@ -204,7 +205,7 @@ class ImagePublisher(Node):
         # Calculamos la cantidad de poses
         poses_len = round(poses.size / 8)
 
-        self.timer = self.create_timer(0.1, self.publish_next_img)
+        self.timer = self.create_timer(1, self.publish_next_img)
 
     # Publica la siguiente imagen
     def publish_next_img(self):
@@ -241,6 +242,7 @@ class ImagePublisher(Node):
         left_images = []
         right_images = []
 
+        # Va leyendo
         while reader.has_next():
             (topic, data, t) = reader.read_next()
             if topic == topic_left:
@@ -290,12 +292,15 @@ class ImageRectifier(Node):
         self.map1_l, self.map2_l = cv2.initUndistortRectifyMap(K_l, dist_coef_l, R_rect_l, P_rect_l, img_size, cv2.CV_32FC1)
         self.map1_r, self.map2_r = cv2.initUndistortRectifyMap(K_r, dist_coef_r, R_rect_r, P_rect_r, img_size, cv2.CV_32FC1)
 
+        # Creamos los publicadores
         self.rect_img_pub_l = self.create_publisher(Image, '/Publisher/Left/rect_img', 10)
         self.rect_img_pub_r = self.create_publisher(Image, '/Publisher/Right/rect_img', 10)
 
+        # Creamos los subcriptores
         self.sub_img_l = Subscriber(self, Image, '/Publisher/Left/raw_img')
         self.sub_img_r = Subscriber(self, Image, '/Publisher/Right/raw_img')
 
+        # Realizamos el callback de ambos subcriptores al mismo tiempo
         self.sync = ApproximateTimeSynchronizer(
             [self.sub_img_l, self.sub_img_r],
             queue_size=10,
@@ -338,9 +343,11 @@ class MatchesFinder(Node):
         self.good_points_3D_pub = self.create_publisher(PointCloud2, '/Publisher/good_points', 10)
         self.filtered_points_3D_pub = self.create_publisher(PointCloud2, '/Publisher/filtered_points', 10)
 
+        # Creamos los subcriptores
         self.sub_rect_img_l = Subscriber(self, Image, '/Publisher/Left/rect_img')
         self.sub_rect_img_r = Subscriber(self, Image, '/Publisher/Right/rect_img')
 
+        # Realizamos el callback de ambos subcriptores al mismo tiempo
         self.sync = ApproximateTimeSynchronizer(
             [self.sub_rect_img_l, self.sub_rect_img_r],
             queue_size=10,
@@ -518,12 +525,15 @@ class SceneRebuilder(Node):
     def __init__(self):
         super().__init__('scene_rebuilder')
 
+        # Creamos los publicadores        
         self.disparity_map_pub = self.create_publisher(Image, '/Publisher/dispariry_map', 10)
         self.rebuilded_scene_pub = self.create_publisher(PointCloud2, '/Publisher/rebuilded_scene', 10)
 
+        # Creamos los subscriptores
         self.sub_rect_img_l = Subscriber(self, Image, '/Publisher/Left/rect_img')
         self.sub_rect_img_r = Subscriber(self, Image, '/Publisher/Right/rect_img')
 
+        # Realizamos el callback de ambos subcriptores al mismo tiempo
         self.sync = ApproximateTimeSynchronizer(
             [self.sub_rect_img_l, self.sub_rect_img_r],
             queue_size=10,
@@ -640,15 +650,18 @@ class TrayectoryPublisher(Node):
     def __init__(self):
         super().__init__('trayectory_publisher')
 
+        # Creamos los publicadores
         self.cam_markers_pub = self.create_publisher(Marker, '/Publisher/camera_markers', 10)
         self.trayectory_pub = self.create_publisher(Path, '/Publisher/trayectory', 10)
 
         self.trayectory_msg = Path()
         self.trayectory_msg.header.frame_id = 'map'
 
+        # Creamos los subscriptores
         self.sub_rect_img_l = Subscriber(self, Image, '/Publisher/Left/rect_img')
         self.sub_rect_img_r = Subscriber(self, Image, '/Publisher/Right/rect_img')
 
+        # Realizamos el callback de ambos subcriptores al mismo tiempo
         self.sync = ApproximateTimeSynchronizer(
             [self.sub_rect_img_l, self.sub_rect_img_r],
             queue_size=10,
@@ -680,8 +693,7 @@ class TrayectoryPublisher(Node):
         t_cam_r = T_cam_world_r[:3, 3]
         Q_cam_r = Rotation.from_matrix(T_cam_world_r[:3, :3]).as_quat()
 
-        # Generamos los puntos de las camaras
-
+        # Generamos el marcador de la camara izquierda
         marker_l = Marker()
         marker_l.header.frame_id = "map"
         marker_l.header.stamp = self.get_clock().now().to_msg()
@@ -689,18 +701,24 @@ class TrayectoryPublisher(Node):
         marker_l.id = 0
         marker_l.type = Marker.SPHERE
         marker_l.action = Marker.ADD
+
+        # Definimos la posicion
         marker_l.pose.position.x = t_cam_l[0]
         marker_l.pose.position.y = t_cam_l[1]
         marker_l.pose.position.z = t_cam_l[2]
+
+        # Definimos la escala
         marker_l.scale.x = 0.05
         marker_l.scale.y = 0.05
         marker_l.scale.z = 0.05
+
+        # Definimos el color
         marker_l.color.a = 1.0
         marker_l.color.r = 0.0
         marker_l.color.g = 0.0
         marker_l.color.b = 1.0  # azul
 
-        # --- Crear marcador para cámara derecha (rojo) ---
+        # Creamos el marcador para cámara derecha (rojo) ---
         marker_r = Marker()
         marker_r.header.frame_id = "map"
         marker_r.header.stamp = self.get_clock().now().to_msg()
@@ -708,17 +726,24 @@ class TrayectoryPublisher(Node):
         marker_r.id = 1
         marker_r.type = Marker.SPHERE
         marker_r.action = Marker.ADD
+
+        # Definimos la posicion
         marker_r.pose.position.x = t_cam_r[0]
         marker_r.pose.position.y = t_cam_r[1]
         marker_r.pose.position.z = t_cam_r[2]
+
+        # Definimos la escala
         marker_r.scale.x = 0.05
         marker_r.scale.y = 0.05
         marker_r.scale.z = 0.05
         marker_r.color.a = 1.0
+
+        # Definimos el color
         marker_r.color.r = 1.0
         marker_r.color.g = 0.0
         marker_r.color.b = 0.0  # rojo
 
+        # Publicamos
         self.cam_markers_pub.publish(marker_l)
         self.cam_markers_pub.publish(marker_r)
 
@@ -727,15 +752,18 @@ class TrayectoryPublisher(Node):
         pose_stamped.header.frame_id = "map"
         pose_stamped.header.stamp = self.get_clock().now().to_msg()
 
+        # Definimos la posicion
         pose_stamped.pose.position.x = t_cam_l[0]
         pose_stamped.pose.position.y = t_cam_l[1]
         pose_stamped.pose.position.z = t_cam_l[2]
 
+        # Definimos la orientacion
         pose_stamped.pose.orientation.x = Q_cam_l[0]
         pose_stamped.pose.orientation.y = Q_cam_l[1]
         pose_stamped.pose.orientation.z = Q_cam_l[2]
         pose_stamped.pose.orientation.w = Q_cam_l[3]
 
+        # Agregamos la trayectoria
         self.trayectory_msg.poses.append(pose_stamped)
         self.trayectory_msg.header.stamp = self.get_clock().now().to_msg()
 
@@ -748,12 +776,11 @@ def main():
     global input_dir, output_dir, poses, cam_info_l, cam_info_r, bridge
 
     # Parseamos los argumentos
-    if len(sys.argv) < 3:
-        print("Uso: python3 script.py <input_dir> <output_dir> [--save True]")
+    if len(sys.argv) < 2:
+        print("Uso: python3 script.py <input_dir>")
         sys.exit(1)
 
     input_dir = sys.argv[1]
-    output_dir = sys.argv[2]
 
     # Generamos los path de los elementos del input
     poses_path = os.path.join(input_dir, "poses.txt")
