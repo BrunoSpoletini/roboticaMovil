@@ -6,7 +6,8 @@ from gtsam import Pose2
 import argparse
 import matplotlib.pyplot as plt
 
-# Ejercicio 1
+# Ejercicio 2
+# Apartado 2.1 A
 def parse_g20_file(filepath):
     poses = {}
     edges = []
@@ -67,6 +68,7 @@ def parse_g20_file(filepath):
 
     return poses, edges
 
+# Apartado 2.2 B - Batch solution
 # Genera un NonLinearFactorGraph con las poses y aristas pasadas como argumento
 def generate_graph(poses, edges):
 
@@ -166,30 +168,49 @@ def extract_trayectory(poses):
     return np.array(xs), np.array(ys), sorted_indexes
 
 # Ploteamos las poses inciales y optimizados
-def plot_poses(initial_poses, optimized_poses, outputdir):
+def plot_poses(initial_poses, optimized_poses, outputdir, filename):
 
     # Extramos los puntos de la trayectoria de los poses iniciales y optimizados
     ixs, iys, ikeys = extract_trayectory(initial_poses)
     oxs, oys, okeys = extract_trayectory(optimized_poses)
 
     plt.figure(figsize=(8,6))
-    plt.plot(ixs, iys, 'o-', label='Poses Iniciales')
-    plt.plot(oxs, oys, 'o-', label='Poses Optimizados')
+    plt.plot(ixs, iys, 'o-', label='Poses Iniciales', markersize=2)
+    plt.plot(oxs, oys, 'o-', label='Poses Optimizados', markersize=2)
     plt.axis('equal')
     plt.xlabel('x (m)')
     plt.ylabel('y (m)')
     plt.title('Poses: inicial vs optimizada (Gauss-Newton)')
     plt.legend()
-    plt.savefig(f'{outputdir}/poses,png', dpi=300)
+    plt.savefig(f'{outputdir}/{filename}.png', dpi=300)
     plt.show()
+
+# Apartado 2.3 C - Incremental solution
+
 
 def main(g20_pathfile, outputdir):
 
+    # --- Ejercicio 2 - Apartado A ---
     poses, edges = parse_g20_file(g20_pathfile)
     graph, initial_poses = generate_graph(poses, edges) 
-    perturbed_initial_poses = pertubateValues(initial_poses, (0.02, 0.02, 0.01), 0)
-    optimized_poses = OptimizeGaussNewton(graph, perturbed_initial_poses)
-    plot_poses(perturbed_initial_poses, optimized_poses, outputdir)
+
+    # --- Ejercicio 2 - Apartado B ---
+    perturbed_initial_poses = pertubateValues(initial_poses, (0.2, 0.2, 0.1), 0)
+
+    # Optimización batch con Gauss-Newton
+    optimized_poses = OptimizeGaussNewton(graph, initial_poses)
+    plot_poses(initial_poses, optimized_poses, outputdir, "posesIniciales_batch")
+
+    # Optimización batch con Gauss-Newton con poses perturbadas
+    optimized_perturbed_poses = OptimizeGaussNewton(graph, perturbed_initial_poses)
+    plot_poses(perturbed_initial_poses, optimized_perturbed_poses, outputdir, "posesPerturbadas_batch")
+
+    # --- Ejercicio 2 - Apartado C ---
+    
+
+    # ---------------------------------
+
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Batch SLAM Intel 2D con GTSAM (Gauss-Newton)")
