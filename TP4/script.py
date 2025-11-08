@@ -167,8 +167,53 @@ def extract_trayectory(poses):
 
     return np.array(xs), np.array(ys), sorted_indexes
 
+# Apartado 2.3 C - Incremental solution
+def incremental_solution(poses, edges):
+    isam = gtsam.ISAM2()
+    result = None
+
+    for idx, (x, y, th) in poses.items():
+        
+        # Inicializamos el grafo de factores y la estimación inicial
+        graph = gtsam.NonlinearFactorGraph()
+        initialEstimate = gtsam.Values()
+        
+        if idx == 0:
+            priorNoise = gtsam.noiseModel.Diagonal.Sigmas(np.array([1e-6, 1e-6, 1e-8]))
+            graph.add(gtsam.PriorFactorPose2(0, Pose2(x, y, th), priorNoise))
+            initialEstimate.insert(idx, Pose2(x, y, th))
+        else:
+            # No es la primera pose: usamos la última pose optimizada como initial estimate
+            prevPose = result.atPose2(idx - 1)
+            initialEstimate.insert(idx, prevPose)
+        
+        # Iteramos sobre cada arista
+        for edge in edges:
+            ide1 = edge['i']
+            ide2 = edge['j']
+            dx = edge['x']
+            dy = edge['y']
+            dtheta = edge['theta']
+            
+            # Si la arista termina en la pose actual
+            if ide2 == idx:
+                # Construimos el modelo de ruido a partir de la covarianza
+                cov = edge['cov']
+                Model = gtsam.noiseModel.Gaussian.Covariance(cov)
+                
+                # Agregamos el BetweenFactor al grafo
+                graph.add(gtsam.BetweenFactorPose2(ide1, ide2, Pose2(dx, dy, dtheta), Model))
+        
+        # Actualizamos ISAM2 con el grafo y la estimación inicial
+        isam.update(graph, initialEstimate)
+        
+        # Calculamos la estimación actual
+        result = isam.calculateEstimate()
+    
+    return result
+
 # Ploteamos las poses inciales y optimizados
-def plot_poses(initial_poses, optimized_poses, outputdir, filename):
+def plot_poses(initial_poses, optimized_poses, outputdir, filename, plot=False):
 
     # Extramos los puntos de la trayectoria de los poses iniciales y optimizados
     ixs, iys, ikeys = extract_trayectory(initial_poses)
@@ -183,10 +228,10 @@ def plot_poses(initial_poses, optimized_poses, outputdir, filename):
     plt.title('Poses: inicial vs optimizada (Gauss-Newton)')
     plt.legend()
     plt.savefig(f'{outputdir}/{filename}.png', dpi=300)
-    plt.show()
-
-# Apartado 2.3 C - Incremental solution
-
+    if plot:
+        plt.show()
+    else:
+        plt.close()
 
 def main(g20_pathfile, outputdir):
 
@@ -206,7 +251,9 @@ def main(g20_pathfile, outputdir):
     plot_poses(perturbed_initial_poses, optimized_perturbed_poses, outputdir, "posesPerturbadas_batch")
 
     # --- Ejercicio 2 - Apartado C ---
-    
+    # Optimización incremental con ISAM2
+    optimized_poses_isam = incremental_solution(poses, edges)
+    plot_poses(initial_poses, optimized_poses_isam, outputdir, "poses_incremental_isam2")
 
     # ---------------------------------
 
