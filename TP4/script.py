@@ -316,7 +316,7 @@ def extract_trayectory_3d(poses):
     return np.array(xs), np.array(ys), np.array(zs), sorted_indexes
 
 # Ploteamos las poses 3D (vista superior x-y y vista 3D)
-def plot_poses_3d(initial_poses, optimized_poses, outputdir, filename):
+def plot_poses_3d(initial_poses, optimized_poses, outputdir, filename, plot=False):
     # Extraemos los puntos de las trayectorias
     ixs, iys, izs, _ = extract_trayectory_3d(initial_poses)
     oxs, oys, ozs, _ = extract_trayectory_3d(optimized_poses)
@@ -347,7 +347,10 @@ def plot_poses_3d(initial_poses, optimized_poses, outputdir, filename):
     
     plt.tight_layout()
     plt.savefig(f'{outputdir}/{filename}.png', dpi=300)
-    plt.show()
+    if plot:
+        plt.show()
+    else:
+        plt.close()
 
 # Apartado 2.3 C - Incremental solution
 def incremental_solution(poses, edges):
@@ -390,6 +393,64 @@ def incremental_solution(poses, edges):
         isam.update(graph, initialEstimate)
         
         # Calculamos la estimación actual
+        result = isam.calculateEstimate()
+    
+    return result
+
+# Apartado 3.3 C - Incremental solution 3D
+def incremental_solution_3d(poses, edges):
+    # Inicializamos el solver ISAM2
+    isam = gtsam.ISAM2()
+    result = None
+    
+    for idx, (x, y, z, qx, qy, qz, qw) in poses.items():
+        
+        # Inicializamos el grafo de factores y la estimación inicial para este paso
+        graph = gtsam.NonlinearFactorGraph()
+        initialEstimate = gtsam.Values()
+        
+        if idx == 0:  # Primera pose
+            # Creamos la primera pose
+            rotation0 = Rot3.Quaternion(qw, qx, qy, qz)
+            translation0 = np.array([x, y, z])
+            pose0 = Pose3(rotation0, translation0)
+            
+            # Agregamos un prior factor para anclar el sistema de referencia
+            priorNoise = gtsam.noiseModel.Diagonal.Sigmas(
+                np.array([1e-6, 1e-6, 1e-6, 1e-8, 1e-8, 1e-8])
+            )
+            graph.add(gtsam.PriorFactorPose3(idx, pose0, priorNoise))
+            initialEstimate.insert(idx, pose0)
+        else:
+            # No es la primera pose: usamos la pose del archivo como estimación inicial
+            rotation = Rot3.Quaternion(qw, qx, qy, qz)
+            translation = np.array([x, y, z])
+            pose = Pose3(rotation, translation)
+            initialEstimate.insert(idx, pose)
+        
+        # Buscamos todas las aristas que terminan en la pose actual
+        for edge in edges:
+            ide1 = edge['i']
+            ide2 = edge['j']
+            
+            # Si la arista termina en la pose actual
+            if ide2 == idx:
+                # Creamos la transformación relativa (medición)
+                rotation_rel = Rot3.Quaternion(edge['qw'], edge['qx'], edge['qy'], edge['qz'])
+                translation_rel = np.array([edge['x'], edge['y'], edge['z']])
+                meas = Pose3(rotation_rel, translation_rel)
+                
+                # Construimos el modelo de ruido desde la covarianza 6x6
+                cov = edge['cov']
+                noiseModel = gtsam.noiseModel.Gaussian.Covariance(cov)
+                
+                # Agregamos el BetweenFactor al grafo
+                graph.add(gtsam.BetweenFactorPose3(ide1, ide2, meas, noiseModel))
+        
+        # Actualizamos ISAM2 incrementalmente
+        isam.update(graph, initialEstimate)
+        
+        # Calculamos la mejor estimación actual
         result = isam.calculateEstimate()
     
     return result
@@ -438,6 +499,8 @@ def main(g20_pathfile, g2o3d_pathfile, outputdir, mode):
         optimized_poses_isam = incremental_solution(poses, edges)
         plot_poses(initial_poses, optimized_poses_isam, outputdir, "poses_incremental_isam2")
 
+        print(f"Trayectorias optimizadas 2D guardadas en el directorio {outputdir}.")
+
     if mode == '3d' or mode == 'both':
         print("\n=== Ejecutando optimización 3D ===")
         # --- Ejercicio 3 ---
@@ -449,9 +512,11 @@ def main(g20_pathfile, g2o3d_pathfile, outputdir, mode):
         optimized_poses_3d = OptimizeGaussNewton(graph_3d, initial_poses_3d)        
         plot_poses_3d(initial_poses_3d, optimized_poses_3d, outputdir, "poses_3d_garage_batch")
 
+        # Optimización incremental con ISAM2
+        optimized_poses_3d_isam = incremental_solution_3d(poses_3d, edges_3d)
+        plot_poses_3d(initial_poses_3d, optimized_poses_3d_isam, outputdir, "poses_3d_garage_incremental_isam2")
 
-
-
+        print(f"Trayectorias optimizadas 3D guardadas en el directorio {outputdir}.")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Batch SLAM con GTSAM (2D y 3D)")
