@@ -7,12 +7,15 @@ import argparse
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
-# Ejercicio 2
 # Apartado 2.1 A
-def parse_g20_file(filepath):
+
+# Parsea un archivo g2o para obtener las poses y aristas del dataset 2D
+def parse_g2o_file(filepath):
+
     poses = {}
     edges = []
 
+    # Leemos el archivo donde esta el dataset
     with open(filepath, 'r') as f:
         for row in f:
             
@@ -40,17 +43,23 @@ def parse_g20_file(filepath):
                 i = int(tokens[1])
                 j = int(tokens[2])
                 x, y, theta = map(float, tokens[3:6])
+
+                # Extraemos el vector de información
                 q11, q12, q13, q22, q23, q33 = map(float, tokens[6:12])
 
-                # Generamos la matriz de información
+                # Reconstruimos la matriz de información 6x6 desde el vector triangular superior
                 info = np.array([
                     [q11, q12, q13],
                     [q12, q22, q23],
                     [q13, q23, q33]
                 ])
 
-                # Obtenemos la covarianza
-                cov = np.linalg.inv(info)
+                # Calculamos la matriz de covarianza 
+                try:
+                    cov = np.linalg.inv(info)
+                except np.linalg.LinAlgError:
+                    # Si la matriz no es invertible, usamos pseudo-inversa
+                    cov = np.linalg.pinv(info)
 
                 # Guardamos la arista
                 edges.append({
@@ -64,19 +73,25 @@ def parse_g20_file(filepath):
                 })
             
             else:
+                # Ignoramos otros tipos de líneas
                 continue
 
 
     return poses, edges
 
-# Ejercicio 3
 # Apartado 3.1 A
+
+# Parsea un archivo g2o para obtener las poses y aristas del dataset 3D
 def parse_g2o_3d_file(filepath):
+
     poses = {}
     edges = []
     
+    # Leemos el archivo donde esta el dataset
     with open(filepath, 'r') as f:
         for line in f:
+
+            # Chequeamos que no sea una fila vacia
             if not line.strip():
                 continue
             
@@ -85,7 +100,8 @@ def parse_g2o_3d_file(filepath):
             
             # Verificamos si es una pose 3D
             if tokens[0] == "VERTEX_SE3:QUAT":
-                # VERTEX_SE3:QUAT i x y z qx qy qz qw
+
+                # Obtenemos los datos
                 i = int(tokens[1])
                 x, y, z = map(float, tokens[2:5])
                 qx, qy, qz, qw = map(float, tokens[5:9])
@@ -95,12 +111,14 @@ def parse_g2o_3d_file(filepath):
             
             # Verificamos si es una arista 3D
             elif tokens[0] == "EDGE_SE3:QUAT":
+
+                # Obtenemos los datos
                 i = int(tokens[1])
                 j = int(tokens[2])
                 x, y, z = map(float, tokens[3:6])
                 qx, qy, qz, qw = map(float, tokens[6:10])
                 
-                # Extraemos el vector de información (21 elementos)
+                # Extraemos el vector de información
                 info_vector = list(map(float, tokens[10:31]))
                 
                 # Reconstruimos la matriz de información 6x6 desde el vector triangular superior
@@ -112,7 +130,7 @@ def parse_g2o_3d_file(filepath):
                         info[col, row] = info_vector[idx]  # Por simetría
                         idx += 1
                 
-                # Calculamos la matriz de covarianza (inversa de la información)
+                # Calculamos la matriz de covarianza 
                 try:
                     cov = np.linalg.inv(info)
                 except np.linalg.LinAlgError:
@@ -140,60 +158,8 @@ def parse_g2o_3d_file(filepath):
     
     return poses, edges
 
-# Apartado 3.2 B 
-def generate_graph_3d(poses, edges):
-    # Creamos el grafo y los valores iniciales
-    graph = gtsam.NonlinearFactorGraph()
-    initial = gtsam.Values()
-    
-    # Insertamos las poses iniciales
-    for idx, (x, y, z, qx, qy, qz, qw) in poses.items():
-        # Creamos la rotación desde el cuaternión (en GTSAM: w, x, y, z)
-        rotation = Rot3.Quaternion(qw, qx, qy, qz)
-        # Creamos la traslación
-        translation = np.array([x, y, z])
-        # Creamos la Pose3
-        pose = Pose3(rotation, translation)
-        # Insertamos en los valores iniciales
-        initial.insert(idx, pose)
-    
-    # Agregamos las aristas
-    for edge in edges:
-        # Creamos la rotación relativa desde el cuaternión
-        rotation = Rot3.Quaternion(edge['qw'], edge['qx'], edge['qy'], edge['qz'])
-        # Creamos la traslación relativa
-        translation = np.array([edge['x'], edge['y'], edge['z']])
-        # Creamos la Pose3 de la medición relativa
-        meas = Pose3(rotation, translation)
-        
-        # Obtenemos el modelo de ruido a partir de la covarianza
-        noise = gtsam.noiseModel.Gaussian.Covariance(edge['cov'])
-        
-        # Añadimos un BetweenFactorPose3 al grafo
-        factor = gtsam.BetweenFactorPose3(edge['i'], edge['j'], meas, noise)
-        graph.add(factor)
-    
-    # Anclamos la primera pose para evitar soluciones flotantes
-    if len(poses) > 0:
-        # Obtenemos la primera pose
-        i0 = min(poses.keys())
-        x0, y0, z0, qx0, qy0, qz0, qw0 = poses[i0]
-        
-        # Creamos la Pose3 inicial
-        rotation0 = Rot3.Quaternion(qw0, qx0, qy0, qz0)
-        translation0 = np.array([x0, y0, z0])
-        pose0 = Pose3(rotation0, translation0)
-        
-        # Definimos una covarianza pequeña para la primera pose
-        cov0 = np.diag([1e-6, 1e-6, 1e-6, 1e-8, 1e-8, 1e-8])
-        noise0 = gtsam.noiseModel.Gaussian.Covariance(cov0)
-
-        # Agregamos la primera pose al grafo
-        graph.add(gtsam.PriorFactorPose3(i0, pose0, noise0))
-    
-    return graph, initial
-
 # Apartado 2.2 B - Batch solution
+
 # Genera un NonLinearFactorGraph con las poses y aristas pasadas como argumento
 def generate_graph(poses, edges):
 
@@ -242,6 +208,7 @@ def pertubateValues(old_poses, sigma, seed):
 
     np.random.seed(seed)
 
+    # Perturbamos cada una de las poses
     for i in old_poses.keys():
 
         # Obtenemos los valores de la pose
@@ -271,7 +238,7 @@ def OptimizeGaussNewton(graph, initial_poses):
 
     return result
 
-# Extrae los puntos de la trayectoria de poses
+# Extrae los puntos de la trayectoria de poses 2D
 def extract_trayectory(poses):
 
     indexes = list(poses.keys())
@@ -290,7 +257,95 @@ def extract_trayectory(poses):
         p = poses.atPose2(index)
         xs.append(p.x()); ys.append(p.y())
 
-    return np.array(xs), np.array(ys), sorted_indexes
+    return np.array(xs), np.array(ys)
+
+# Plotea las poses inciales y optimizados
+def plot_poses(initial_poses, optimized_poses, outputdir, filename, title, plot=False):
+
+    # Extramos los puntos de la trayectoria de los poses iniciales y optimizados
+    ixs, iys = extract_trayectory(initial_poses)
+    oxs, oys = extract_trayectory(optimized_poses)
+
+    # Generamos una figura con las poses iniciales y las poses optimizadas
+    plt.figure(figsize=(8,6))
+    plt.plot(ixs, iys, 'o-', label='Poses Iniciales', markersize=2)
+    plt.plot(oxs, oys, 'o-', label='Poses Optimizados', markersize=2)
+    plt.axis('equal')
+    plt.xlabel('x (m)')
+    plt.ylabel('y (m)')
+    plt.title(title)
+    plt.legend()
+    plt.savefig(f'{outputdir}/{filename}.png', dpi=300)
+
+    if plot:
+        plt.show()
+    else:
+        plt.close()
+
+# Apartado 3.2 B 
+
+# Genera un NonLinearFactorGraph con las poses y aristas pasadas como argumento
+def generate_graph_3d(poses, edges):
+
+    # Creamos el grafo y los valores iniciales
+    graph = gtsam.NonlinearFactorGraph()
+    initial = gtsam.Values()
+    
+    # Insertamos las poses iniciales
+    for idx, (x, y, z, qx, qy, qz, qw) in poses.items():
+
+        # Creamos la rotación desde el cuaternión
+        rotation = Rot3.Quaternion(qw, qx, qy, qz)
+
+        # Creamos la traslación
+        translation = np.array([x, y, z])
+        
+        # Creamos la Pose3
+        pose = Pose3(rotation, translation)
+
+        # Insertamos en las poses iniciales
+        initial.insert(idx, pose)
+    
+    # Agregamos las aristas
+    for edge in edges:
+
+        # Creamos la rotación relativa desde el cuaternión
+        rotation = Rot3.Quaternion(edge['qw'], edge['qx'], edge['qy'], edge['qz'])
+
+        # Creamos la traslación relativa
+        translation = np.array([edge['x'], edge['y'], edge['z']])
+
+        # Creamos la Pose3 de la medición relativa
+        meas = Pose3(rotation, translation)
+        
+        # Obtenemos el modelo de ruido a partir de la covarianza
+        noise = gtsam.noiseModel.Gaussian.Covariance(edge['cov'])
+        
+        # Añadir un BetweenFactorPose2 al grafo con la informacion
+        factor = gtsam.BetweenFactorPose3(edge['i'], edge['j'], meas, noise)
+        graph.add(factor)
+        
+    
+    # Anclamos la primera pose para evitar soluciones flotantes
+    if len(poses) > 0:
+
+        # Obtenemos la primera pose
+        i0 = min(poses.keys())
+        x0, y0, z0, qx0, qy0, qz0, qw0 = poses[i0]
+        
+        # Creamos la Pose3 inicial
+        rotation0 = Rot3.Quaternion(qw0, qx0, qy0, qz0)
+        translation0 = np.array([x0, y0, z0])
+        pose0 = Pose3(rotation0, translation0)
+        
+        # Definimos una covarianza pequeña para la primera pose
+        cov0 = np.diag([1e-6, 1e-6, 1e-6, 1e-8, 1e-8, 1e-8])
+        noise0 = gtsam.noiseModel.Gaussian.Covariance(cov0)
+
+        # Agregamos la primera pose al grafo
+        graph.add(gtsam.PriorFactorPose3(i0, pose0, noise0))
+    
+    return graph, initial
 
 # Extrae los puntos de la trayectoria de poses 3D
 def extract_trayectory_3d(poses):
@@ -317,6 +372,7 @@ def extract_trayectory_3d(poses):
 
 # Ploteamos las poses 3D (vista superior x-y y vista 3D)
 def plot_poses_3d(initial_poses, optimized_poses, outputdir, filename, plot=False):
+
     # Extraemos los puntos de las trayectorias
     ixs, iys, izs, _ = extract_trayectory_3d(initial_poses)
     oxs, oys, ozs, _ = extract_trayectory_3d(optimized_poses)
@@ -337,8 +393,8 @@ def plot_poses_3d(initial_poses, optimized_poses, outputdir, filename, plot=Fals
     
     # Subplot 2: Vista 3D
     ax2 = fig.add_subplot(122, projection='3d')
-    ax2.plot(ixs, iys, izs, 'o-', label='Poses Iniciales', markersize=2, alpha=0.7)
-    ax2.plot(oxs, oys, ozs, 'o-', label='Poses Optimizadas', markersize=2, alpha=0.7)
+    ax2.plot(ixs, iys, izs , 'o-', label='Poses Iniciales', markersize=2, alpha=0.7)
+    ax2.plot(oxs, oys, ozs , 'o-', label='Poses Optimizadas', markersize=2, alpha=0.7)
     ax2.set_xlabel('x (m)')
     ax2.set_ylabel('y (m)')
     ax2.set_zlabel('z (m)')
@@ -347,23 +403,29 @@ def plot_poses_3d(initial_poses, optimized_poses, outputdir, filename, plot=Fals
     
     plt.tight_layout()
     plt.savefig(f'{outputdir}/{filename}.png', dpi=300)
+
     if plot:
         plt.show()
     else:
         plt.close()
 
 # Apartado 2.3 C - Incremental solution
+
+# Calcula una solucion incremental con ISAM2
 def incremental_solution(poses, edges):
+
+    # Inicializamos el solver ISAM2
     isam = gtsam.ISAM2()
     result = None
 
+    # Iteramos por cada pose
     for idx, (x, y, th) in poses.items():
         
         # Inicializamos el grafo de factores y la estimación inicial
         graph = gtsam.NonlinearFactorGraph()
         initialEstimate = gtsam.Values()
         
-        if idx == 0:
+        if idx == 0: # Primera pose
             priorNoise = gtsam.noiseModel.Diagonal.Sigmas(np.array([1e-6, 1e-6, 1e-8]))
             graph.add(gtsam.PriorFactorPose2(0, Pose2(x, y, th), priorNoise))
             initialEstimate.insert(idx, Pose2(x, y, th))
@@ -397,12 +459,17 @@ def incremental_solution(poses, edges):
     
     return result
 
+
 # Apartado 3.3 C - Incremental solution 3D
+
+# Calcula una solucion incremental con ISAM2
 def incremental_solution_3d(poses, edges):
+
     # Inicializamos el solver ISAM2
     isam = gtsam.ISAM2()
     result = None
     
+    # Iteramos por cada pose
     for idx, (x, y, z, qx, qy, qz, qw) in poses.items():
         
         # Inicializamos el grafo de factores y la estimación inicial para este paso
@@ -455,63 +522,48 @@ def incremental_solution_3d(poses, edges):
     
     return result
 
-# Ploteamos las poses inciales y optimizados
-def plot_poses(initial_poses, optimized_poses, outputdir, filename, plot=False):
-
-    # Extramos los puntos de la trayectoria de los poses iniciales y optimizados
-    ixs, iys, ikeys = extract_trayectory(initial_poses)
-    oxs, oys, okeys = extract_trayectory(optimized_poses)
-
-    plt.figure(figsize=(8,6))
-    plt.plot(ixs, iys, 'o-', label='Poses Iniciales', markersize=2)
-    plt.plot(oxs, oys, 'o-', label='Poses Optimizados', markersize=2)
-    plt.axis('equal')
-    plt.xlabel('x (m)')
-    plt.ylabel('y (m)')
-    plt.title('Poses: inicial vs optimizada (Gauss-Newton)')
-    plt.legend()
-    plt.savefig(f'{outputdir}/{filename}.png', dpi=300)
-    if plot:
-        plt.show()
-    else:
-        plt.close()
-
+# Funcion principal del script
 def main(g20_pathfile, g2o3d_pathfile, outputdir, mode):
 
     if mode == '2d' or mode == 'both':
         print("=== Ejecutando optimización 2D ===")
+
         # --- Ejercicio 2 - Apartado A ---
-        poses, edges = parse_g20_file(g20_pathfile)
-        graph, initial_poses = generate_graph(poses, edges) 
+        poses, edges = parse_g2o_file(g20_pathfile)
 
         # --- Ejercicio 2 - Apartado B ---
+        graph, initial_poses = generate_graph(poses, edges) 
         perturbed_initial_poses = pertubateValues(initial_poses, (0.2, 0.2, 0.1), 0)
 
         # Optimización batch con Gauss-Newton
         optimized_poses = OptimizeGaussNewton(graph, initial_poses)
-        plot_poses(initial_poses, optimized_poses, outputdir, "posesIniciales_batch")
+        plot_poses(initial_poses, optimized_poses, outputdir, 'Poses: inicial vs optimizada (Gauss-Newton)', "posesIniciales_batch")
 
         # Optimización batch con Gauss-Newton con poses perturbadas
         optimized_perturbed_poses = OptimizeGaussNewton(graph, perturbed_initial_poses)
-        plot_poses(perturbed_initial_poses, optimized_perturbed_poses, outputdir, "posesPerturbadas_batch")
+        plot_poses(perturbed_initial_poses, optimized_perturbed_poses, outputdir, 'Poses perturbadas: inicial vs optimizada (Gauss-Newton)', "posesPerturbadas_batch")
+
         # --- Ejercicio 2 - Apartado C ---
         # Optimización incremental con ISAM2
         optimized_poses_isam = incremental_solution(poses, edges)
-        plot_poses(initial_poses, optimized_poses_isam, outputdir, "poses_incremental_isam2")
+        plot_poses(initial_poses, optimized_poses_isam, outputdir, 'Poses: inicial vs optimizada (ISAM2)', "poses_incremental_isam2")
 
         print(f"Trayectorias optimizadas 2D guardadas en el directorio {outputdir}.")
 
     if mode == '3d' or mode == 'both':
         print("\n=== Ejecutando optimización 3D ===")
-        # --- Ejercicio 3 ---
-        # Procesamiento 3D
+
+        # --- Ejercicio 3 - Apartado A ---
         poses_3d, edges_3d = parse_g2o_3d_file(g2o3d_pathfile)
-        graph_3d, initial_poses_3d = generate_graph_3d(poses_3d, edges_3d)
         
+        # --- Ejercicio 3 - Apartado B ---
+        graph_3d, initial_poses_3d = generate_graph_3d(poses_3d, edges_3d)
+
         # Optimización batch 3D
         optimized_poses_3d = OptimizeGaussNewton(graph_3d, initial_poses_3d)        
         plot_poses_3d(initial_poses_3d, optimized_poses_3d, outputdir, "poses_3d_garage_batch")
 
+        # --- Ejercicio 3 - Apartado C ---
         # Optimización incremental con ISAM2
         optimized_poses_3d_isam = incremental_solution_3d(poses_3d, edges_3d)
         plot_poses_3d(initial_poses_3d, optimized_poses_3d_isam, outputdir, "poses_3d_garage_incremental_isam2")
@@ -519,6 +571,8 @@ def main(g20_pathfile, g2o3d_pathfile, outputdir, mode):
         print(f"Trayectorias optimizadas 3D guardadas en el directorio {outputdir}.")
 
 if __name__ == '__main__':
+
+    # Parseamos los argumentos
     parser = argparse.ArgumentParser(description="Batch SLAM con GTSAM (2D y 3D)")
     parser.add_argument('--g2o', type=str, default='input_INTEL_g2o.g2o', help='ruta al archivo .g2o 2D')
     parser.add_argument('--g2o3d', type=str, default='parking-garage.g2o', help='ruta al archivo .g2o 3D')
@@ -526,4 +580,6 @@ if __name__ == '__main__':
     parser.add_argument('--mode', type=str, default='both', choices=['2d', '3d', 'both'], 
                         help='Modo de operación: 2d, 3d o both')
     args = parser.parse_args()
+
+    # Ejecutamos el script
     main(args.g2o, args.g2o3d, args.output, args.mode)
