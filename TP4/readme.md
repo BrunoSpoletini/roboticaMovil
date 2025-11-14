@@ -30,10 +30,10 @@ Para ejecutar el programa, correr el siguiente comando
 python3 script.py --g2o <g2o-input> --g2o3d <g20-3d-input> --output <outdir> --mode <mode>
 ```
 Donde
-- <g2o-input> : es el archivo con del dataset 2D
-- <g20-3d-input> : es el archivo con el dataset 3D
-- <outdir> : es el directorio donde guardar el output del script
-- <mode> : es el modo ejecucion, el mismo puede ser:
+- \<g2o-input\> : es el archivo con del dataset 2D
+- \<g20-3d-input\> : es el archivo con el dataset 3D
+- \<outdir\> : es el directorio donde guardar el output del script
+- \<mode\> : es el modo ejecucion, el mismo puede ser:
   - 2d : utiliza solo el dataset 2D
   - 3d : utiliza solo el dataset 3D
   - both : utiliza ambos datasets
