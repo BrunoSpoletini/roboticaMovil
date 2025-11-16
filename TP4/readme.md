@@ -24,6 +24,11 @@ make -j2
 cmake -DGTSAM_BUILD_PYTHON_STUBS=OFF ..
 make python-install
 ```
+## Instalar el programa
+El programa se puede instalar en el siguiente repositorio
+```
+git clone git@github.com:BrunoSpoletini/roboticaMovil.git
+```
 # Ejecutar el programa
 Primero es necesario acceder al directorio del ejercicio
 ```
@@ -43,3 +48,5 @@ Donde
   - both : utiliza ambos datasets
     
 En el directorio ya se encuentran los datasets del garage y la oficina mencionadas en el enunciado
+
+Otros datasets se pueden encontrar en el siguiente [link](https://lucacarlone.mit.edu/datasets/)
