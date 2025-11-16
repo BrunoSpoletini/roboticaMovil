@@ -41,4 +41,5 @@ Donde
   - 2d : utiliza solo el dataset 2D
   - 3d : utiliza solo el dataset 3D
   - both : utiliza ambos datasets
+    
 En el directorio ya se encuentran los datasets del garage y la oficina mencionadas en el enunciado
