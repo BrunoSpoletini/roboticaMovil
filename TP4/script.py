@@ -260,7 +260,7 @@ def extract_trayectory(poses):
     return np.array(xs), np.array(ys)
 
 # Plotea las poses inciales y optimizados
-def plot_poses(initial_poses, optimized_poses, outputdir, filename, title, plot=False):
+def plot_poses(initial_poses, optimized_poses, outputdir, title, filename, plot=False):
 
     # Extramos los puntos de la trayectoria de los poses iniciales y optimizados
     ixs, iys = extract_trayectory(initial_poses)
