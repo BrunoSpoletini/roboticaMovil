@@ -6,6 +6,7 @@ from gtsam import Pose2, Pose3, Rot3
 import argparse
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+import os
 
 # Apartado 2.1 A
 
@@ -524,6 +525,9 @@ def incremental_solution_3d(poses, edges):
 
 # Funcion principal del script
 def main(g20_pathfile, g2o3d_pathfile, outputdir, mode):
+
+    # Creamos el directorio de salida si el mismo no existe
+    os.makedirs(outputdir, exist_ok=True)
 
     if mode == '2d' or mode == 'both':
         print("=== Ejecutando optimización 2D ===")
