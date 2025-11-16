@@ -25,6 +25,10 @@ cmake -DGTSAM_BUILD_PYTHON_STUBS=OFF ..
 make python-install
 ```
 # Ejecutar el programa
+Primero es necesario acceder al directorio del ejercicio
+```
+cd TP4
+```
 Para ejecutar el programa, correr el siguiente comando
 ```
 python3 script.py --g2o <g2o-input> --g2o3d <g20-3d-input> --output <outdir> --mode <mode>
@@ -37,5 +41,4 @@ Donde
   - 2d : utiliza solo el dataset 2D
   - 3d : utiliza solo el dataset 3D
   - both : utiliza ambos datasets
-
-
+En el directorio ya se encuentran los datasets del garage y la oficina mencionadas en el enunciado
