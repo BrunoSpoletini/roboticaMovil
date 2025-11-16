@@ -27,7 +27,7 @@ make python-install
 ## Instalar el programa
 El programa se puede instalar en el siguiente repositorio
 ```
-git clone git@github.com:BrunoSpoletini/roboticaMovil.git
+git clone https://github.com/BrunoSpoletini/roboticaMovil.git
 ```
 # Ejecutar el programa
 Primero es necesario acceder al directorio del ejercicio
